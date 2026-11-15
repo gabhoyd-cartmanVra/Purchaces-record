@@ -1,0 +1,10 @@
+{
+  "name": "NXTsavings — Nextglobal Petty Cash",
+  "short_name": "NXTsavings",
+  "description": "Control de Caja Chica Semanal, Ahorros y Comprobantes en USDT/VES para Nextglobal",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "orientation": "portrait-primary"
+}

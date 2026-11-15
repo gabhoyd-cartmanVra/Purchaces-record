@@ -290,9 +290,9 @@ if LOGO_FILE.exists():
 # FASTAPI APPLICATION INITIALIZATION
 # ==============================================================================
 app = FastAPI(
-    title="NXTsavings — Nextglobal Petty Cash & Weekly Budget Record",
+    title="NXTsavings — Nextglobal Weekly Budget Record",
     description="Sistema ágil de registro de caja chica, control semanal en USDT/VES y reportes PDF.",
-    version="2.1.0",
+    version="---" #ejemplo 2.0.1,
 )
 
 app.add_middleware(
@@ -541,7 +541,7 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
         textColor=colors.HexColor("#1F2937"),
     )
 
-    story.append(Paragraph("NEXTGLOBAL — WEEKLY EXPENSE REPORT", title_style))
+    story.append(Paragraph("NEXXTGLOBAL — WEEKLY EXPENSE REPORT", title_style))
     story.append(
         Paragraph(
             f"<b>Week {week_data['numero']}</b> &nbsp;|&nbsp; Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &nbsp;|&nbsp; USDT Exchange Rate: <b>VES {rate:.2f}</b>",
@@ -562,7 +562,7 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
             "Presupuesto Semanal",
             "Total Gastado (Semana)",
             "Disponible de la Semana",
-            "Saldo Disponible (Caja Actual)",
+            "Ahorro Disponible Actualizado",
         ],
         [
             f"${weekly_budget_usdt:.2f} USDT\n(VES {weekly_budget_usdt * rate:,.2f})",
@@ -718,23 +718,19 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
     buffer.seek(0)
     return buffer.getvalue()
 
-
 # ==============================================================================
 # PYDANTIC REQUEST SCHEMAS
 # ==============================================================================
 class LoginRequest(BaseModel):
     password: str
 
-
 class PendingItemRequest(BaseModel):
     item: str
     priority: str = "Medium"
     notes: str = ""
 
-
 class FundWeekRequest(BaseModel):
     funded: bool
-
 
 class WeekSettingsRequest(BaseModel):
     presupuesto_base: float
@@ -1133,7 +1129,6 @@ def serve_logo_txt():
     if LOGO_FILE.exists():
         return FileResponse(LOGO_FILE, media_type="text/plain")
     return Response(content="", media_type="text/plain")
-
 
 if __name__ == "__main__":
     import uvicorn

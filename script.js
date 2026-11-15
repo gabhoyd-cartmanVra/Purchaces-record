@@ -713,9 +713,21 @@ function renderFundingAndMetrics() {
 
   const remLabel = document.getElementById("kpi-weekly-rem-label");
   const remVal = document.getElementById("kpi-weekly-rem-val");
+  const remNote = document.getElementById("kpi-weekly-rem-note");
+  const isFunded = Boolean(w.budget_funded);
   remLabel.textContent = `Disponible de la semana (de $${formatNum(m.weekly_budget_usdt)}):`;
   remVal.textContent = `$${formatNum(m.weekly_remaining_usdt)} USDT (VES ${formatNum(m.weekly_remaining_ves)})`;
-  remVal.classList.toggle("negative", m.weekly_remaining_usdt < 0);
+  remVal.classList.toggle("unfunded", !isFunded);
+  remVal.classList.toggle("negative", isFunded && m.weekly_remaining_usdt < 0);
+  if (remNote) {
+    if (!isFunded) {
+      remNote.textContent = "⏳ Sin fondear aún — no han llegado los fondos de esta semana";
+      remNote.classList.remove("funded");
+    } else {
+      remNote.textContent = "✅ Presupuesto semanal fondeado y activo";
+      remNote.classList.add("funded");
+    }
+  }
 }
 
 function getReceiptUrl(fileRef) {
@@ -1096,7 +1108,7 @@ async function generateClientSidePdf() {
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.text("NEXTGLOBAL — WEEKLY EXPENSE REPORT", 36, y);
+  doc.text("NEXXTGLOBAL — WEEKLY EXPENSE REPORT", 36, y);
   y += 16;
 
   doc.setFont("helvetica", "normal");
@@ -1115,7 +1127,7 @@ async function generateClientSidePdf() {
         "Presupuesto Semanal",
         "Total Gastado (Semana)",
         "Disponible de la Semana",
-        "Saldo Disponible (Caja Actual)",
+        "Ahorro Disponible Actualizado",
       ],
     ],
     body: [
@@ -1134,75 +1146,118 @@ async function generateClientSidePdf() {
   y = doc.lastAutoTable.finalY + 22;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
+  doc.setTextColor(17, 24, 39);
   doc.text("Expenses Breakdown (Desglose de Gastos)", 36, y);
-  y += 8;
+  y += 12;
 
   const gastos = w.gastos || [];
-  const rows = gastos.map((g, idx) => {
-    const pVes = Number(g.precio) || 0;
-    const pUsdt = Number(g.precio_usdt) || (r > 0 ? pVes / r : 0);
-    const recs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : [];
-    return [
-      String(idx + 1),
-      g.producto || "",
-      `VES ${formatNum(pVes)}`,
-      `$${formatNum(pUsdt)} USDT`,
-      recs.length > 0 ? `${recs.length} adjunto(s)` : "Sin adjunto",
-      g.fecha || "",
-    ];
-  });
+  if (gastos.length === 0) {
+    doc.setDrawColor(209, 213, 219);
+    doc.setFillColor(249, 250, 251);
+    doc.roundedRect(36, y, 540, 42, 6, 6, "FD");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(107, 114, 128);
+    doc.text("Sin gastos registrados en esta semana.", 50, y + 25);
+  } else {
+    for (let i = 0; i < gastos.length; i++) {
+      const g = gastos[i];
+      const pVes = Number(g.precio) || 0;
+      const pUsdt = Number(g.precio_usdt) || (r > 0 ? pVes / r : 0);
+      const recs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : [];
 
-  doc.autoTable({
-    startY: y,
-    head: [["#", "Insumo / Servicio", "Monto (VES)", "Monto (USDT)", "Comprobantes", "Fecha"]],
-    body: rows.length > 0 ? rows : [["—", "Sin gastos registrados en esta semana", "—", "—", "—", "—"]],
-    theme: "striped",
-    headStyles: { fillColor: [31, 41, 55], textColor: 255 },
-    bodyStyles: { fontSize: 8.5 },
-  });
-
-  // Embed receipt images in Annex page
-  const annexItems = [];
-  for (let i = 0; i < gastos.length; i++) {
-    const g = gastos[i];
-    const recs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : [];
-    for (const rFile of recs) {
-      const ext = (rFile.split(".").pop() || "").toLowerCase();
-      if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
-        const dataUrl = await fetchImageAsDataUrl(getReceiptUrl(rFile));
-        if (dataUrl) {
-          annexItems.push({
-            caption: `#${i + 1} — ${g.producto} (VES ${formatNum(g.precio)} / $${formatNum(g.precio_usdt)} USDT)`,
-            dataUrl,
-          });
+      // Fetch first image attachment if present so we can embed it on the right side of the card
+      let receiptDataUrl = null;
+      for (const rFile of recs) {
+        const ext = (rFile.split(".").pop() || "").toLowerCase();
+        if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
+          receiptDataUrl = await fetchImageAsDataUrl(getReceiptUrl(rFile));
+          if (receiptDataUrl) break;
         }
       }
-    }
-  }
 
-  if (annexItems.length > 0) {
-    doc.addPage();
-    let ay = 40;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text(`Anexo de Comprobantes — Semana ${w.numero}`, 36, ay);
-    ay += 20;
-
-    for (const item of annexItems) {
-      if (ay > 520) {
+      const cardHeight = 116;
+      if (y + cardHeight > 745) {
         doc.addPage();
-        ay = 40;
+        y = 40;
       }
+
+      // Draw outer expense card (recuadro individual por gasto)
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.9);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(36, y, 540, cardHeight, 6, 6, "FD");
+
+      // Subtle right-hand panel for the receipt preview
+      const splitX = 360;
+      doc.setFillColor(249, 250, 251);
+      doc.rect(splitX, y + 1, 215, cardHeight - 2, "F");
+      doc.setDrawColor(229, 231, 235);
+      doc.line(splitX, y, splitX, y + cardHeight);
+
+      // Left side: synchronized expense details (Insumo/Servicio, Monto VES, Monto USDT, Fecha)
+      const leftX = 50;
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text(item.caption, 36, ay);
-      ay += 8;
-      try {
-        doc.addImage(item.dataUrl, "JPEG", 36, ay, 260, 210);
-        ay += 228;
-      } catch (_) {
-        ay += 20;
+      doc.setFontSize(8.5);
+      doc.setTextColor(107, 114, 128);
+      doc.text(`GASTO #${i + 1} · INSUMO / SERVICIO`, leftX, y + 20);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(17, 24, 39);
+      const prodLines = doc.splitTextToSize(String(g.producto || "Sin descripción"), 295);
+      doc.text(prodLines.slice(0, 2), leftX, y + 35);
+
+      const detailsY = y + 64;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(55, 65, 81);
+      doc.text("Monto (VES):", leftX, detailsY);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(17, 24, 39);
+      doc.text(`VES ${formatNum(pVes)}`, leftX + 75, detailsY);
+
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(55, 65, 81);
+      doc.text("Monto (USDT):", leftX, detailsY + 18);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(4, 120, 87);
+      doc.text(`$${formatNum(pUsdt)} USDT`, leftX + 75, detailsY + 18);
+
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(55, 65, 81);
+      doc.text("Fecha:", leftX, detailsY + 36);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(75, 85, 99);
+      doc.text(String(g.fecha || "—"), leftX + 75, detailsY + 36);
+
+      // Right side: subtle receipt thumbnail or status label
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(107, 114, 128);
+      doc.text("COMPROBANTE ADJUNTO", splitX + 107.5, y + 14, { align: "center" });
+
+      if (receiptDataUrl) {
+        try {
+          doc.addImage(receiptDataUrl, "JPEG", splitX + 42, y + 20, 130, 86);
+        } catch (_) {
+          doc.setFont("helvetica", "italic");
+          doc.setFontSize(8.5);
+          doc.text("Adjunto registrado", splitX + 107.5, y + 64, { align: "center" });
+        }
+      } else if (recs.length > 0) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(75, 85, 99);
+        doc.text(`Documento adjunto (${recs.length})`, splitX + 107.5, y + 64, { align: "center" });
+      } else {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        doc.setTextColor(156, 163, 175);
+        doc.text("Sin comprobante adjunto", splitX + 107.5, y + 64, { align: "center" });
       }
+
+      y += cardHeight + 12;
     }
   }
 

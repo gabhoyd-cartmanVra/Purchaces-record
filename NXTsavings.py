@@ -595,35 +595,74 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
     story.append(summary_table)
     story.append(Spacer(1, 18))
 
-    story.append(Paragraph("<b>Expenses Breakdown (Desglose de Gastos)</b>", styles["Heading3"]))
-    story.append(Spacer(1, 6))
+    story.append(Paragraph("<b>Desglose de Gastos (Expenses Breakdown)</b>", styles["Heading3"]))
+    story.append(Spacer(1, 8))
+
+    card_title_style = ParagraphStyle(
+        "CardItemTitle",
+        parent=styles["Normal"],
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#111827"),
+    )
+    card_meta_style = ParagraphStyle(
+        "CardItemMeta",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor("#374151"),
+    )
+    card_empty_att_style = ParagraphStyle(
+        "CardEmptyAtt",
+        parent=styles["Normal"],
+        fontSize=8,
+        leading=11,
+        alignment=1,
+        textColor=colors.HexColor("#9CA3AF"),
+    )
 
     expenses = week_data.get("gastos", [])
-    annex_images = []
 
     if not expenses:
         story.append(
-            Paragraph("No expenses recorded for this week.", styles["Normal"])
+            Paragraph("No hay gastos registrados en esta semana.", styles["Normal"])
         )
     else:
-        item_table_data = [
-            [
-                "#",
-                "Item / Service Name",
-                "Price (VES)",
-                "Price (USDT)",
-                "Receipts",
-                "Date",
-            ]
-        ]
         for idx, g in enumerate(expenses, 1):
             p_ves = float(g.get("precio", 0.0))
             p_usdt = float(
                 g.get("precio_usdt", p_ves / rate if rate > 0 else 0.0)
             )
+            fecha_txt = str(g.get("fecha", "—"))
+            prod_txt = str(g.get("producto", "Sin descripción"))
             receipts = g.get("facturas", [])
 
-            img_elements = []
+            # Left side content: Insumo/Servicio, Monto VES, Monto USDT, Fecha
+            left_flowables = [
+                Paragraph(
+                    f"<font color='#6B7280'><b>#{idx}</b></font> &nbsp; <b>{prod_txt}</b>",
+                    card_title_style,
+                ),
+                Spacer(1, 6),
+                Paragraph(
+                    f"<b>Monto (VES):</b> VES {p_ves:,.2f}",
+                    card_meta_style,
+                ),
+                Paragraph(
+                    f"<b>Monto (USDT):</b> <font color='#0284C7'><b>${p_usdt:.2f} USDT</b></font>",
+                    card_meta_style,
+                ),
+                Paragraph(
+                    f"<b>Fecha:</b> <font color='#6B7280'>{fecha_txt}</font>",
+                    card_meta_style,
+                ),
+            ]
+
+            # Right side content: Subtle receipt preview(s) inside the same box
+            right_flowables = []
+            max_box_w = 185.0 / max(len(receipts), 1)
+            max_box_h = 95.0
+
             for r_file in receipts:
                 local_path = ensure_receipt_cached_locally(r_file)
                 safe_name = Path(r_file.split("?")[0]).name
@@ -633,86 +672,77 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
                     try:
                         with PILImage.open(local_path) as pil_im:
                             pil_rgb = pil_im.convert("RGB")
-                            thumb_io = io.BytesIO()
-                            pil_rgb.save(thumb_io, format="JPEG", quality=82)
-                            thumb_io.seek(0)
-                            rl_img = RLImage(thumb_io, width=42, height=42)
-                            img_elements.append(rl_img)
-
-                            annex_io = io.BytesIO()
-                            pil_rgb.save(annex_io, format="JPEG", quality=88)
-                            annex_io.seek(0)
                             w_orig, h_orig = pil_rgb.size
-                            max_w, max_h = 440.0, 290.0
-                            scale = min(max_w / max(w_orig, 1), max_h / max(h_orig, 1), 1.0)
-                            annex_images.append(
-                                (
-                                    f"#{idx} — {g.get('producto', '')} (VES {p_ves:,.2f} / ${p_usdt:.2f} USDT)",
-                                    safe_name,
-                                    annex_io,
-                                    w_orig * scale,
-                                    h_orig * scale,
-                                )
+                            scale = min(
+                                max_box_w / max(w_orig, 1),
+                                max_box_h / max(h_orig, 1),
+                                1.0,
                             )
+                            draw_w = max(36.0, w_orig * scale)
+                            draw_h = max(36.0, h_orig * scale)
+
+                            thumb_io = io.BytesIO()
+                            pil_rgb.save(thumb_io, format="JPEG", quality=85)
+                            thumb_io.seek(0)
+                            rl_img = RLImage(thumb_io, width=draw_w, height=draw_h)
+                            rl_img.hAlign = "CENTER"
+                            right_flowables.append(rl_img)
                     except Exception:
-                        img_elements.append(Paragraph("📎 Image", cell_style))
+                        right_flowables.append(
+                            Paragraph("📎 Comprobante adjunto", card_empty_att_style)
+                        )
                 elif ext_file == ".pdf":
-                    img_elements.append(Paragraph("📄 PDF Receipt", cell_style))
+                    right_flowables.append(
+                        Paragraph(f"📄 Comprobante PDF<br/>({safe_name})", card_empty_att_style)
+                    )
                 else:
-                    img_elements.append(Paragraph("📎 Attached", cell_style))
+                    right_flowables.append(
+                        Paragraph("📎 Adjunto", card_empty_att_style)
+                    )
 
-            receipt_cell = img_elements if img_elements else Paragraph("—", cell_style)
+            if not right_flowables:
+                right_cell = Paragraph("Sin comprobante adjunto", card_empty_att_style)
+            elif len(right_flowables) == 1:
+                right_cell = right_flowables[0]
+            else:
+                # Arrange multiple receipts side-by-side neatly inside the right half
+                sub_tbl = Table([right_flowables])
+                sub_tbl.setStyle(
+                    TableStyle(
+                        [
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                        ]
+                    )
+                )
+                right_cell = sub_tbl
 
-            item_table_data.append(
-                [
-                    str(idx),
-                    Paragraph(str(g.get("producto", "")), cell_style),
-                    f"VES {p_ves:,.2f}",
-                    f"${p_usdt:.2f}",
-                    receipt_cell,
-                    str(g.get("fecha", "")),
-                ]
+            card_table = Table(
+                [[left_flowables, right_cell]],
+                colWidths=[325, 215],
             )
-
-        expense_table = Table(
-            item_table_data, colWidths=[24, 176, 85, 65, 95, 95]
-        )
-        expense_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F2937")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                    ("ALIGN", (2, 0), (3, -1), "RIGHT"),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
-                ]
+            card_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (0, 0), colors.white),
+                        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#F9FAFB")),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                        ("TOPPADDING", (0, 0), (-1, -1), 10),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                        ("LEFTPADDING", (0, 0), (0, 0), 12),
+                        ("RIGHTPADDING", (0, 0), (0, 0), 12),
+                        ("LEFTPADDING", (1, 0), (1, 0), 8),
+                        ("RIGHTPADDING", (1, 0), (1, 0), 8),
+                        ("BOX", (0, 0), (-1, -1), 0.85, colors.HexColor("#D1D5DB")),
+                        ("LINEBEFORE", (1, 0), (1, 0), 0.6, colors.HexColor("#E5E7EB")),
+                    ]
+                )
             )
-        )
-        story.append(expense_table)
-
-    if annex_images:
-        story.append(PageBreak())
-        story.append(
-            Paragraph(
-                f"<b>Receipt Annex — Week {week_data['numero']} (Comprobantes de Pago)</b>",
-                styles["Heading2"],
-            )
-        )
-        story.append(Spacer(1, 10))
-        for caption_text, r_file, annex_io, draw_w, draw_h in annex_images:
-            block = [
-                Paragraph(f"<b>{caption_text}</b> <font color='#6B7280'>({r_file})</font>", sub_style),
-                Spacer(1, 4),
-                RLImage(annex_io, width=draw_w, height=draw_h),
-                Spacer(1, 14),
-            ]
-            story.append(KeepTogether(block))
+            story.append(KeepTogether([card_table, Spacer(1, 9)]))
 
     doc.build(story)
     buffer.seek(0)

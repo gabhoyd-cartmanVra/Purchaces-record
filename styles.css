@@ -438,11 +438,18 @@ html, body {
   padding-top: 10px;
   border-top: 1px solid var(--border-subtle);
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.kpi-weekly-rem-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 0.8rem;
 }
 
 .kpi-weekly-rem-label {
@@ -454,10 +461,27 @@ html, body {
   font-family: var(--font-mono);
   font-weight: 700;
   color: var(--status-positive);
+  transition: color 0.2s ease;
 }
 
 .kpi-weekly-rem-val.negative {
   color: var(--status-danger);
+}
+
+.kpi-weekly-rem-val.unfunded {
+  color: #7c8799 !important;
+}
+
+.kpi-weekly-rem-note {
+  font-size: 0.74rem;
+  color: #8b96a8;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.kpi-weekly-rem-note.funded {
+  color: var(--status-positive);
 }
 
 /* ==========================================================================

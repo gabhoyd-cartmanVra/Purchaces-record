@@ -1,4 +1,4 @@
-# NXTsavings — Nextglobal Weekly Budget & Petty Cash Record
+# NXTsavings — Nextglobal Weekly Budget Record
 
 Sistema de registro de caja chica semanal, control de remanente/ahorro en USDT y Bolívares (VES), carga de comprobantes con compresión inteligente para celular y generación de reportes ejecutivos en PDF.
 

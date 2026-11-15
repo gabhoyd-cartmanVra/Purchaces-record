@@ -1,16 +1,20 @@
 /* ==========================================================================
-   NXTsavings — Frontend Application Controller (FastAPI + Direct Supabase Hybrid)
+   NXTsavings — Frontend Application Controller
+   Connected to Nextglobal's real Supabase tables:
+     - semanas (numero=0 for Global Saldo Disponible; numero>=41 for each week)
+     - gastos (id, semana_numero, producto, precio, precio_usdt, factura, fecha)
+     - pending_purchases (id, item, priority, notes, date_added)
+     - Storage bucket: recibos
    ========================================================================== */
 
 const NG_SUPABASE_URL = "https://aswdqhmityjxyerblsfo.supabase.co";
 const NG_SUPABASE_KEY = "sb_publishable_zOQEgkqE7PcpsqTOFUWN2w_Om3JjrxJ";
+const STORAGE_BUCKET = "recibos";
 const DEFAULT_PASS = "Ng90071";
 
 const appState = {
   authenticated: localStorage.getItem("nxt_authenticated") === "true",
-  backendMode: "fastapi", // 'fastapi' or 'static-supabase'
-  supabaseClient: null,
-  rawStore: { semanas: [], pending_purchases: [] },
+  backendMode: "detecting", // 'fastapi' or 'supabase-direct'
   realCurrentWeek: 41,
   selectedWeek: 41,
   rate: 100.0,
@@ -25,7 +29,7 @@ const appState = {
 };
 
 // ==========================================================================
-// UTILITY HELPERS & IMAGE COMPRESSION
+// UTILITY HELPERS & AUTOMATIC IMAGE COMPRESSION
 // ==========================================================================
 function showToast(message, type = "success") {
   const container = document.getElementById("toast-container");
@@ -65,16 +69,18 @@ function getISOWeekNumber() {
   return Math.max(41, weekNo);
 }
 
+function todayDateStr() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function nowFormatted() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/**
- * Automatically compresses phone camera photos in the browser using Canvas
- * so users never need external tools like iloveimg.com.
- */
 async function compressImageFile(file) {
   const ext = (file.name.split(".").pop() || "").toLowerCase();
   if (ext === "pdf" || file.type === "application/pdf") {
@@ -155,26 +161,233 @@ async function compressImageFile(file) {
 }
 
 // ==========================================================================
-// DUAL-MODE DATA ENGINE (FASTAPI BACKEND + STATIC SUPABASE FALLBACK)
+// DIRECT SUPABASE REST & STORAGE CLIENT (FOR GITHUB PAGES & FALLBACK)
 // ==========================================================================
-async function initSupabaseFallback() {
-  if (!appState.supabaseClient && window.supabase) {
-    appState.supabaseClient = window.supabase.createClient(
-      NG_SUPABASE_URL,
-      NG_SUPABASE_KEY
-    );
+function sbHeaders(extra = {}) {
+  return {
+    apikey: NG_SUPABASE_KEY,
+    Authorization: `Bearer ${NG_SUPABASE_KEY}`,
+    ...extra,
+  };
+}
+
+async function sbGetGlobalRow() {
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/semanas?numero=eq.0&select=*`,
+    { headers: sbHeaders() }
+  );
+  if (res.ok) {
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0) return rows[0];
   }
-  if (!appState.logoBase64) {
-    try {
-      const res = await fetch("logo.txt");
-      if (res.ok) {
-        appState.logoBase64 = (await res.text()).trim();
-      }
-    } catch (_) {}
+  const initPayload = {
+    numero: 0,
+    presupuesto_base: 25.0,
+    remanente_anterior: 60.0,
+    budget_funded: false,
+    presupuesto_disponible: 60.0,
+    total_gastado: 0.0,
+  };
+  await sbUpsertWeekRow(initPayload);
+  return initPayload;
+}
+
+async function sbSetGlobalBalance(newBalanceUsdt, defaultBudget = null) {
+  const row = await sbGetGlobalRow();
+  const bal = Number(Number(newBalanceUsdt).toFixed(2));
+  const baseB =
+    defaultBudget !== null
+      ? Number(Number(defaultBudget).toFixed(2))
+      : Number(row.presupuesto_base || 25.0);
+  return await sbUpsertWeekRow({
+    numero: 0,
+    presupuesto_base: baseB,
+    remanente_anterior: bal,
+    budget_funded: false,
+    presupuesto_disponible: bal,
+    total_gastado: 0.0,
+  });
+}
+
+async function sbAdjustGlobalBalance(deltaUsdt) {
+  const row = await sbGetGlobalRow();
+  const currentBal = Number(row.presupuesto_disponible ?? 60.0);
+  const newBal = Number((currentBal + Number(deltaUsdt)).toFixed(2));
+  await sbSetGlobalBalance(newBal);
+  return newBal;
+}
+
+async function sbGetWeekRow(weekNum) {
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/semanas?numero=eq.${Number(weekNum)}&select=*`,
+    { headers: sbHeaders() }
+  );
+  if (res.ok) {
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0) return rows[0];
+  }
+  return null;
+}
+
+async function sbUpsertWeekRow(weekPayload) {
+  const clean = {
+    numero: Number(weekPayload.numero),
+    presupuesto_base: Number(Number(weekPayload.presupuesto_base ?? 25.0).toFixed(2)),
+    remanente_anterior: Number(Number(weekPayload.remanente_anterior ?? 0.0).toFixed(2)),
+    budget_funded: Boolean(weekPayload.budget_funded),
+    presupuesto_disponible: Number(Number(weekPayload.presupuesto_disponible ?? 0.0).toFixed(2)),
+    total_gastado: Number(Number(weekPayload.total_gastado ?? 0.0).toFixed(2)),
+  };
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/semanas?on_conflict=numero`,
+    {
+      method: "POST",
+      headers: sbHeaders({
+        "Content-Type": "application/json",
+        Prefer: "return=representation,resolution=merge-duplicates",
+      }),
+      body: JSON.stringify(clean),
+    }
+  );
+  if (res.ok) {
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0) return rows[0];
+  }
+  return clean;
+}
+
+async function sbGetExpensesForWeek(weekNum) {
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/gastos?semana_numero=eq.${Number(weekNum)}&select=*&order=id.asc`,
+    { headers: sbHeaders() }
+  );
+  if (res.ok) {
+    const rows = await res.json();
+    if (Array.isArray(rows)) return rows;
+  }
+  return [];
+}
+
+async function sbInsertExpense(weekNum, producto, precio, precioUsdt, facturaStr) {
+  const payload = {
+    semana_numero: Number(weekNum),
+    producto,
+    precio: Number(Number(precio).toFixed(2)),
+    precio_usdt: Number(Number(precioUsdt).toFixed(2)),
+    factura: facturaStr || null,
+    fecha: todayDateStr(),
+  };
+  const res = await fetch(`${NG_SUPABASE_URL}/rest/v1/gastos`, {
+    method: "POST",
+    headers: sbHeaders({
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error("No se pudo guardar el gasto en Supabase.");
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbUpdateExpense(expenseId, producto, precio, precioUsdt, facturaStr) {
+  const payload = {
+    producto,
+    precio: Number(Number(precio).toFixed(2)),
+    precio_usdt: Number(Number(precioUsdt).toFixed(2)),
+    factura: facturaStr || null,
+  };
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/gastos?id=eq.${Number(expenseId)}`,
+    {
+      method: "PATCH",
+      headers: sbHeaders({
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      }),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    throw new Error("No se pudo actualizar el gasto en Supabase.");
+  }
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbDeleteExpense(expenseId) {
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/gastos?id=eq.${Number(expenseId)}`,
+    {
+      method: "DELETE",
+      headers: sbHeaders(),
+    }
+  );
+  if (!res.ok) {
+    throw new Error("No se pudo eliminar el gasto en Supabase.");
   }
 }
 
-async function fetchLiveRateStatic() {
+async function sbUploadReceiptFile(weekNum, fileObj) {
+  const ext = (fileObj.name.split(".").pop() || "jpg").toLowerCase();
+  const rName = `receipt_wk${weekNum}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
+  const url = `${NG_SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${rName}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: sbHeaders({
+      "Content-Type": fileObj.type || "image/jpeg",
+      "x-upsert": "true",
+    }),
+    body: fileObj,
+  });
+  if (!res.ok) {
+    throw new Error("Error subiendo comprobante al bucket recibos en Supabase.");
+  }
+  return `${NG_SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${rName}`;
+}
+
+async function sbListPending() {
+  const res = await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/pending_purchases?select=*&order=id.asc`,
+    { headers: sbHeaders() }
+  );
+  if (res.ok) {
+    const rows = await res.json();
+    if (Array.isArray(rows)) return rows;
+  }
+  return [];
+}
+
+async function sbInsertPending(item, priority) {
+  const res = await fetch(`${NG_SUPABASE_URL}/rest/v1/pending_purchases`, {
+    method: "POST",
+    headers: sbHeaders({
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    }),
+    body: JSON.stringify({
+      item,
+      priority,
+      notes: "",
+      date_added: todayDateStr(),
+    }),
+  });
+  if (!res.ok) throw new Error("Error guardando pendiente en Supabase.");
+}
+
+async function sbDeletePending(id) {
+  await fetch(
+    `${NG_SUPABASE_URL}/rest/v1/pending_purchases?id=eq.${Number(id)}`,
+    {
+      method: "DELETE",
+      headers: sbHeaders(),
+    }
+  );
+}
+
+async function fetchLiveRateClient() {
   try {
     const res = await fetch("https://ve.dolarapi.com/v1/dolares/paralelo");
     if (res.ok) {
@@ -189,155 +402,139 @@ async function fetchLiveRateStatic() {
   } catch (_) {}
 }
 
-function normalizeWeekLocal(sem, rate) {
-  if (typeof sem.presupuesto_base !== "number") sem.presupuesto_base = 25.0;
-  if (typeof sem.remanente_anterior !== "number") sem.remanente_anterior = 60.0;
-  if (typeof sem.budget_funded !== "boolean") sem.budget_funded = false;
-  if (!Array.isArray(sem.gastos)) sem.gastos = [];
-
-  let totalVes = 0;
-  sem.gastos.forEach((g) => {
-    const p = Number(g.precio) || 0;
-    totalVes += p;
-    let list = Array.isArray(g.facturas)
-      ? g.facturas
-      : g.factura
-      ? [g.factura]
-      : [];
-    list = list.filter(Boolean);
-    g.facturas = list;
-    g.factura = list[0] || null;
-    if (!g.precio_usdt) {
-      g.precio_usdt = rate > 0 ? Number((p / rate).toFixed(2)) : 0;
-    }
-  });
-
-  sem.total_gastado = Number(totalVes.toFixed(2));
-  const base = sem.budget_funded ? Number(sem.presupuesto_base) : 0;
-  sem.presupuesto_disponible = Number(
-    (base + Number(sem.remanente_anterior)).toFixed(2)
-  );
-  return sem;
-}
-
-function getOrCreateWeekLocal(store, weekNum, rate) {
-  let found = store.semanas.find((s) => Number(s.numero) === Number(weekNum));
-  if (found) return normalizeWeekLocal(found, rate);
-
-  const valid = store.semanas
-    .filter((s) => Number(s.numero) >= 41)
-    .sort((a, b) => Number(a.numero) - Number(b.numero));
-  const prevList = valid.filter((s) => Number(s.numero) < Number(weekNum));
-
-  let rollover = 60.0;
-  if (prevList.length > 0 || valid.length > 0) {
-    const prev = normalizeWeekLocal(
-      prevList[prevList.length - 1] || valid[valid.length - 1],
-      rate
-    );
-    const spentUsdt = rate > 0 ? prev.total_gastado / rate : 0;
-    const prevBase = prev.budget_funded ? Number(prev.presupuesto_base) : 0;
-    const prevAvail = prevBase + Number(prev.remanente_anterior);
-    rollover = Number((prevAvail - spentUsdt).toFixed(2));
-  }
-
-  const newWeek = {
-    numero: Number(weekNum),
-    presupuesto_base: 25.0,
-    remanente_anterior: rollover,
-    budget_funded: false,
-    presupuesto_disponible: rollover,
-    gastos: [],
-    total_gastado: 0.0,
-  };
-  store.semanas.push(newWeek);
-  return normalizeWeekLocal(newWeek, rate);
-}
-
-async function saveStoreStatic() {
-  localStorage.setItem("nxt_backup_store", JSON.stringify(appState.rawStore));
-  if (appState.supabaseClient) {
-    await appState.supabaseClient
-      .from("app_data")
-      .upsert({ id: 1, content: appState.rawStore });
-  }
-}
-
+// ==========================================================================
+// STATE LOADING (FASTAPI OR DIRECT SUPABASE)
+// ==========================================================================
 async function loadState(weekNum = null) {
   const targetWeek = weekNum || appState.selectedWeek || getISOWeekNumber();
-  try {
-    const res = await fetch(`/api/state?week=${targetWeek}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (res.ok && (res.headers.get("content-type") || "").includes("json")) {
-      const payload = await res.json();
-      appState.backendMode = "fastapi";
-      appState.realCurrentWeek = payload.real_current_week;
-      appState.selectedWeek = payload.selected_week;
-      appState.rate = payload.rate;
-      appState.rateSource = payload.rate_source;
-      appState.rateUpdatedAt = payload.rate_updated_at;
-      appState.logoBase64 = payload.logo_base64 || appState.logoBase64;
-      appState.weekData = payload.week;
-      appState.metrics = payload.metrics;
-      appState.pendingPurchases = payload.pending_purchases || [];
-      renderAll();
-      return;
-    }
-  } catch (_) {
-    // Fallback to static-supabase mode (e.g., GitHub Pages)
-  }
 
-  appState.backendMode = "static-supabase";
-  await initSupabaseFallback();
-  if (!appState.rateUpdatedAt) {
-    await fetchLiveRateStatic();
-  }
-
-  if (appState.supabaseClient) {
+  // 1. Try FastAPI backend if available
+  if (appState.backendMode !== "supabase-direct") {
     try {
-      const { data } = await appState.supabaseClient
-        .from("app_data")
-        .select("content")
-        .eq("id", 1)
-        .single();
-      if (data && data.content) {
-        appState.rawStore = data.content;
+      const res = await fetch(`/api/state?week=${targetWeek}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok && (res.headers.get("content-type") || "").includes("json")) {
+        const payload = await res.json();
+        appState.backendMode = "fastapi";
+        appState.realCurrentWeek = payload.real_current_week;
+        appState.selectedWeek = payload.selected_week;
+        appState.rate = payload.rate;
+        appState.rateSource = payload.rate_source;
+        appState.rateUpdatedAt = payload.rate_updated_at;
+        appState.logoBase64 = payload.logo_base64 || appState.logoBase64;
+        appState.weekData = payload.week;
+        appState.metrics = payload.metrics;
+        appState.pendingPurchases = payload.pending_purchases || [];
+        renderAll();
+        return;
       }
+    } catch (_) {
+      appState.backendMode = "supabase-direct";
+    }
+  }
+
+  // 2. Direct Supabase mode (GitHub Pages / Static Browser Mode)
+  appState.backendMode = "supabase-direct";
+  if (!appState.logoBase64) {
+    try {
+      const lRes = await fetch("logo.txt");
+      if (lRes.ok) appState.logoBase64 = (await lRes.text()).trim();
     } catch (_) {}
   }
-
-  if (!appState.rawStore.semanas) appState.rawStore.semanas = [];
-  if (!appState.rawStore.pending_purchases)
-    appState.rawStore.pending_purchases = [];
+  if (!appState.rateUpdatedAt) {
+    await fetchLiveRateClient();
+  }
 
   appState.realCurrentWeek = getISOWeekNumber();
-  appState.selectedWeek = targetWeek || appState.realCurrentWeek;
-  const currentWeek = getOrCreateWeekLocal(
-    appState.rawStore,
-    appState.selectedWeek,
-    appState.rate
+  appState.selectedWeek = Number(targetWeek) || appState.realCurrentWeek;
+  const rate = appState.rate || 100.0;
+
+  const globalRow = await sbGetGlobalRow();
+  const globalAvailableUsdt = Number(
+    Number(globalRow.presupuesto_disponible ?? 60.0).toFixed(2)
   );
-  await saveStoreStatic();
+  const defaultBaseBudget = Number(
+    Number(globalRow.presupuesto_base ?? 25.0).toFixed(2)
+  );
 
-  const totalSpentVes = Number(currentWeek.total_gastado) || 0;
+  let weekRow = await sbGetWeekRow(appState.selectedWeek);
+  if (!weekRow) {
+    weekRow = await sbUpsertWeekRow({
+      numero: appState.selectedWeek,
+      presupuesto_base: defaultBaseBudget,
+      remanente_anterior: globalAvailableUsdt,
+      budget_funded: false,
+      presupuesto_disponible: globalAvailableUsdt,
+      total_gastado: 0.0,
+    });
+  }
+
+  const rawExpenses = await sbGetExpensesForWeek(appState.selectedWeek);
+  let totalVes = 0;
+  const gastos = rawExpenses.map((g) => {
+    const pVes = Number(Number(g.precio || 0).toFixed(2));
+    const pUsdt = Number(
+      Number(g.precio_usdt || (rate > 0 ? pVes / rate : 0)).toFixed(2)
+    );
+    totalVes += pVes;
+    const facturasList = g.factura
+      ? String(g.factura)
+          .split("|")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+    return {
+      id: g.id,
+      semana_numero: appState.selectedWeek,
+      producto: g.producto || "",
+      precio: pVes,
+      precio_usdt: pUsdt,
+      factura: facturasList[0] || null,
+      facturas: facturasList,
+      fecha: g.fecha || "",
+    };
+  });
+
+  totalVes = Number(totalVes.toFixed(2));
+  if (Math.abs(Number(weekRow.total_gastado || 0) - totalVes) > 0.01) {
+    weekRow.total_gastado = totalVes;
+    weekRow.presupuesto_disponible = globalAvailableUsdt;
+    await sbUpsertWeekRow(weekRow);
+  }
+
+  const weeklyBudgetUsdt = Number(
+    Number(weekRow.presupuesto_base ?? defaultBaseBudget).toFixed(2)
+  );
   const totalSpentUsdt =
-    appState.rate > 0 ? Number((totalSpentVes / appState.rate).toFixed(2)) : 0;
-  const availUsdt = Number(currentWeek.presupuesto_disponible) || 0;
-  const remUsdt = Number((availUsdt - totalSpentUsdt).toFixed(2));
-  const remVes = Number((remUsdt * appState.rate).toFixed(2));
+    rate > 0 ? Number((totalVes / rate).toFixed(2)) : 0.0;
+  const weeklyRemainingUsdt = Number(
+    (weeklyBudgetUsdt - totalSpentUsdt).toFixed(2)
+  );
 
-  appState.weekData = currentWeek;
-  appState.pendingPurchases = appState.rawStore.pending_purchases;
-  appState.metrics = {
-    weekly_budget_usdt: Number(currentWeek.presupuesto_base),
-    rollover_usdt: Number(currentWeek.remanente_anterior),
-    available_budget_usdt: availUsdt,
-    total_spent_ves: totalSpentVes,
-    total_spent_usdt: totalSpentUsdt,
-    remaining_balance_usdt: remUsdt,
-    remaining_balance_ves: remVes,
+  appState.weekData = {
+    id: weekRow.id,
+    numero: appState.selectedWeek,
+    presupuesto_base: weeklyBudgetUsdt,
+    remanente_anterior: globalAvailableUsdt,
+    budget_funded: Boolean(weekRow.budget_funded),
+    presupuesto_disponible: globalAvailableUsdt,
+    total_gastado: totalVes,
+    gastos,
   };
+
+  appState.metrics = {
+    weekly_budget_usdt: weeklyBudgetUsdt,
+    weekly_budget_ves: Number((weeklyBudgetUsdt * rate).toFixed(2)),
+    total_spent_ves: totalVes,
+    total_spent_usdt: totalSpentUsdt,
+    weekly_remaining_usdt: weeklyRemainingUsdt,
+    weekly_remaining_ves: Number((weeklyRemainingUsdt * rate).toFixed(2)),
+    global_available_usdt: globalAvailableUsdt,
+    global_available_ves: Number((globalAvailableUsdt * rate).toFixed(2)),
+  };
+
+  appState.pendingPurchases = await sbListPending();
   renderAll();
 }
 
@@ -345,7 +542,6 @@ async function loadState(weekNum = null) {
 // UI RENDERING
 // ==========================================================================
 function renderAll() {
-  // Logos
   if (appState.logoBase64) {
     const src = `data:image/png;base64,${appState.logoBase64}`;
     const hLogo = document.getElementById("header-logo");
@@ -360,7 +556,6 @@ function renderAll() {
     }
   }
 
-  // Header Rate
   const rateValEl = document.getElementById("header-rate-value");
   if (rateValEl) rateValEl.textContent = `VES ${formatNum(appState.rate)}`;
   const rateSourceEl = document.getElementById("rate-source-label");
@@ -374,7 +569,6 @@ function renderAll() {
       : "";
   }
 
-  // Auth vs Workspace visibility
   const authView = document.getElementById("auth-view");
   const appView = document.getElementById("app-view");
   const logoutBtn = document.getElementById("btn-logout");
@@ -394,7 +588,6 @@ function renderAll() {
   logoutBtn.classList.remove("hidden");
   mobileNav.classList.remove("hidden");
 
-  // Week Controls
   document.getElementById("real-week-caption").textContent =
     `Semana calendario actual: Semana ${appState.realCurrentWeek}`;
   const weekInput = document.getElementById("input-week-num");
@@ -427,7 +620,6 @@ function renderPendingLists() {
     return `<span class="badge badge-medium">🟡 Media</span>`;
   };
 
-  // Public list
   const pubContainer = document.getElementById("pub-pending-list");
   if (pubContainer) {
     if (items.length === 0) {
@@ -435,7 +627,7 @@ function renderPendingLists() {
     } else {
       pubContainer.innerHTML = items
         .map(
-          (it, idx) => `
+          (it) => `
         <div class="pending-row">
           <div>
             <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(it.item)}</div>
@@ -443,7 +635,7 @@ function renderPendingLists() {
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             ${buildBadge(it.priority)}
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${idx})" title="Eliminar pendiente">🗑️</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${it.id})" title="Eliminar pendiente">🗑️</button>
           </div>
         </div>
       `
@@ -452,7 +644,6 @@ function renderPendingLists() {
     }
   }
 
-  // Sidebar list
   const sbContainer = document.getElementById("sb-pending-list");
   if (sbContainer) {
     if (items.length === 0) {
@@ -460,15 +651,15 @@ function renderPendingLists() {
     } else {
       sbContainer.innerHTML = items
         .map(
-          (it, idx) => `
+          (it) => `
         <div class="pending-row">
           <div style="min-width: 0; flex: 1;">
             <div style="font-weight: 600; font-size: 0.85rem; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(it.item)}</div>
             <div style="margin-top: 2px;">${buildBadge(it.priority)}</div>
           </div>
           <div style="display:flex; align-items:center; gap:5px;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="prefillExpenseFromPending(${idx})" title="Cargar en Registrar Gasto">⚡</button>
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${idx})" title="Quitar de pendientes">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="prefillExpenseFromPending(${it.id})" title="Cargar en Registrar Gasto">⚡</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${it.id})" title="Quitar de pendientes">🗑️</button>
           </div>
         </div>
       `
@@ -482,7 +673,6 @@ function renderFundingAndMetrics() {
   if (!appState.weekData || !appState.metrics) return;
   const w = appState.weekData;
   const m = appState.metrics;
-  const r = appState.rate || 100;
 
   const banner = document.getElementById("funding-banner");
   const icon = document.getElementById("funding-icon");
@@ -493,11 +683,11 @@ function renderFundingAndMetrics() {
   if (w.budget_funded) {
     banner.className = "funding-banner is-funded";
     icon.textContent = "✅";
-    title.textContent = `Semana ${w.numero} fondeada (+${formatNum(w.presupuesto_base)} USDT sumados al disponible)`;
+    title.textContent = `Semana ${w.numero} fondeada (+$${formatNum(w.presupuesto_base)} USDT sumados al Saldo Disponible)`;
     subtitle.textContent =
-      "El presupuesto semanal aprobado ya fue transferido e incluido en el saldo disponible.";
+      "El presupuesto semanal aprobado ya fue transferido y sumado al saldo disponible en caja.";
     btn.className = "btn btn-secondary";
-    btn.textContent = `➖ Revertir Fondeo (-${formatNum(w.presupuesto_base)} USDT)`;
+    btn.textContent = `➖ Revertir Fondeo (-$${formatNum(w.presupuesto_base)} USDT)`;
   } else {
     banner.className = "funding-banner is-unfunded";
     icon.textContent = "ℹ️";
@@ -505,30 +695,34 @@ function renderFundingAndMetrics() {
     subtitle.textContent =
       "Haz clic en el botón cuando recibas la transferencia semanal para sumarla al saldo disponible.";
     btn.className = "btn btn-primary";
-    btn.textContent = `➕ Fondear Semana (+${formatNum(w.presupuesto_base)} USDT)`;
+    btn.textContent = `➕ Fondear Semana (+$${formatNum(w.presupuesto_base)} USDT)`;
   }
 
+  // Recuadro 1: Presupuesto Semanal + Saldo Disponible Global (dentro del mismo recuadro)
   document.getElementById("kpi-budget-usdt").textContent = `$${formatNum(m.weekly_budget_usdt)} USDT`;
-  document.getElementById("kpi-budget-ves").textContent = `VES ${formatNum(m.weekly_budget_usdt * r)}`;
+  document.getElementById("kpi-budget-ves").textContent = `VES ${formatNum(m.weekly_budget_ves)}`;
 
-  document.getElementById("kpi-rollover-usdt").textContent = `$${formatNum(m.rollover_usdt)} USDT`;
-  document.getElementById("kpi-rollover-ves").textContent = `VES ${formatNum(m.rollover_usdt * r)}`;
+  const availEl = document.getElementById("kpi-avail-usdt");
+  availEl.textContent = `$${formatNum(m.global_available_usdt)} USDT`;
+  availEl.classList.toggle("negative", m.global_available_usdt < 0);
+  document.getElementById("kpi-avail-ves").textContent = `VES ${formatNum(m.global_available_ves)}`;
 
+  // Recuadro 2: Total Gastado + abajo/pequeño el Total Disponible DE LA SEMANA
   document.getElementById("kpi-spent-usdt").textContent = `$${formatNum(m.total_spent_usdt)} USDT`;
   document.getElementById("kpi-spent-ves").textContent = `VES ${formatNum(m.total_spent_ves)}`;
 
-  const availEl = document.getElementById("kpi-avail-usdt");
-  availEl.textContent = `$${formatNum(m.remaining_balance_usdt)} USDT`;
-  availEl.classList.toggle("negative", m.remaining_balance_usdt < 0);
-  document.getElementById("kpi-avail-ves").textContent = `VES ${formatNum(m.remaining_balance_ves)}`;
+  const remLabel = document.getElementById("kpi-weekly-rem-label");
+  const remVal = document.getElementById("kpi-weekly-rem-val");
+  remLabel.textContent = `Disponible de la semana (de $${formatNum(m.weekly_budget_usdt)}):`;
+  remVal.textContent = `$${formatNum(m.weekly_remaining_usdt)} USDT (VES ${formatNum(m.weekly_remaining_ves)})`;
+  remVal.classList.toggle("negative", m.weekly_remaining_usdt < 0);
 }
 
-function getReceiptUrl(filename) {
-  if (!filename) return "";
-  if (appState.backendMode === "fastapi") {
-    return `/api/receipts/${encodeURIComponent(filename)}`;
-  }
-  return `${NG_SUPABASE_URL}/storage/v1/object/public/receipts/${encodeURIComponent(filename)}`;
+function getReceiptUrl(fileRef) {
+  if (!fileRef) return "";
+  if (fileRef.startsWith("http")) return fileRef;
+  const safeName = fileRef.split("/").pop();
+  return `${NG_SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${encodeURIComponent(safeName)}`;
 }
 
 function renderSummaryTable() {
@@ -582,8 +776,8 @@ function renderSummaryTable() {
         <td style="font-size: 0.78rem; color: var(--text-secondary);">${escapeHtml(g.fecha || "")}</td>
         <td>
           <div style="display:flex; gap:6px;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="jumpToEditExpense(${idx})" title="Editar este gasto">✏️</button>
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeleteExpense(${idx})" title="Eliminar este gasto">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="jumpToEditExpense(${g.id})" title="Editar este gasto">✏️</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeleteExpense(${g.id})" title="Eliminar este gasto">🗑️</button>
           </div>
         </td>
       </tr>
@@ -607,22 +801,23 @@ function renderEditSection() {
   emptyEl.classList.add("hidden");
   wrapper.classList.remove("hidden");
 
-  const prevVal = Number(selectEl.value) || 0;
+  const prevId = Number(selectEl.value);
   selectEl.innerHTML = gastos
     .map(
       (g, idx) =>
-        `<option value="${idx}">${idx + 1}. ${escapeHtml(g.producto)} — VES ${formatNum(g.precio)}</option>`
+        `<option value="${g.id}">${idx + 1}. ${escapeHtml(g.producto)} — VES ${formatNum(g.precio)}</option>`
     )
     .join("");
 
-  const activeIdx = prevVal >= 0 && prevVal < gastos.length ? prevVal : 0;
-  selectEl.value = String(activeIdx);
-  populateEditFormForIndex(activeIdx);
+  const exists = gastos.some((g) => Number(g.id) === prevId);
+  const activeId = exists ? prevId : gastos[0].id;
+  selectEl.value = String(activeId);
+  populateEditFormForId(activeId);
 }
 
-function populateEditFormForIndex(idx) {
+function populateEditFormForId(expenseId) {
   const gastos = (appState.weekData && appState.weekData.gastos) || [];
-  const target = gastos[idx];
+  const target = gastos.find((g) => Number(g.id) === Number(expenseId));
   if (!target) return;
 
   document.getElementById("edit-expense-name").value = target.producto || "";
@@ -642,28 +837,28 @@ function populateEditFormForIndex(idx) {
     currContainer.innerHTML = `<span class="card-subtitle">Este gasto no tiene comprobantes adjuntos actualmente.</span>`;
   } else {
     currContainer.innerHTML = receipts
-      .map(
-        (rFile, i) =>
-          `<button type="button" class="receipt-chip" onclick="openReceiptModal('${escapeAttr(rFile)}', '${escapeAttr(target.producto)}')">📎 Ver comprobante actual #${i + 1} (${escapeHtml(rFile)})</button>`
-      )
+      .map((rFile, i) => {
+        const shortName = rFile.split("/").pop();
+        return `<button type="button" class="receipt-chip" onclick="openReceiptModal('${escapeAttr(rFile)}', '${escapeAttr(target.producto)}')">📎 Ver comprobante actual #${i + 1} (${escapeHtml(shortName)})</button>`;
+      })
       .join("");
   }
   updateLiveConversions();
 }
 
 function renderSettingsInputs() {
-  if (!appState.weekData) return;
+  if (!appState.weekData || !appState.metrics) return;
   const bInput = document.getElementById("setting-base-budget");
-  const rInput = document.getElementById("setting-rollover");
+  const gInput = document.getElementById("setting-global-balance");
   const mInput = document.getElementById("setting-manual-rate");
 
-  if (document.activeElement !== bInput) {
-    bInput.value = Number(appState.weekData.presupuesto_base).toFixed(2);
+  if (bInput && document.activeElement !== bInput) {
+    bInput.value = Number(appState.metrics.weekly_budget_usdt).toFixed(2);
   }
-  if (document.activeElement !== rInput) {
-    rInput.value = Number(appState.weekData.remanente_anterior).toFixed(2);
+  if (gInput && document.activeElement !== gInput) {
+    gInput.value = Number(appState.metrics.global_available_usdt).toFixed(2);
   }
-  if (document.activeElement !== mInput) {
+  if (mInput && document.activeElement !== mInput) {
     mInput.value = Number(appState.rate).toFixed(2);
   }
 }
@@ -695,25 +890,26 @@ function escapeAttr(str) {
 }
 
 // ==========================================================================
-// INTERACTIVE ACTIONS & API CALLS
+// INTERACTIVE ACTIONS & CRUD HANDLERS
 // ==========================================================================
-window.openReceiptModal = function (filename, itemTitle) {
+window.openReceiptModal = function (fileRef, itemTitle) {
   const modal = document.getElementById("receipt-modal");
   const title = document.getElementById("modal-title");
   const subtitle = document.getElementById("modal-subtitle");
   const body = document.getElementById("modal-body");
 
+  const shortName = fileRef.split("/").pop();
   title.textContent = `📎 ${itemTitle || "Comprobante"}`;
-  subtitle.textContent = filename;
+  subtitle.textContent = shortName;
 
-  const url = getReceiptUrl(filename);
-  const ext = (filename.split(".").pop() || "").toLowerCase();
+  const url = getReceiptUrl(fileRef);
+  const ext = (shortName.split(".").pop() || "").toLowerCase();
 
   if (ext === "pdf") {
     body.innerHTML = `
       <div style="padding: 24px;">
         <p style="margin-bottom: 14px;">Este comprobante es un documento PDF.</p>
-        <a href="${url}" target="_blank" download="${escapeAttr(filename)}" class="btn btn-primary">
+        <a href="${url}" target="_blank" download="${escapeAttr(shortName)}" class="btn btn-primary">
           📄 Abrir / Descargar Comprobante PDF
         </a>
       </div>
@@ -722,8 +918,8 @@ window.openReceiptModal = function (filename, itemTitle) {
     body.innerHTML = `
       <img src="${url}" alt="Comprobante" class="modal-receipt-img" />
       <div style="margin-top: 14px;">
-        <a href="${url}" target="_blank" download="${escapeAttr(filename)}" class="btn btn-secondary btn-sm">
-          ⬇️ Descargar Imagen Original
+        <a href="${url}" target="_blank" download="${escapeAttr(shortName)}" class="btn btn-secondary btn-sm">
+          ⬇️ Abrir / Descargar Imagen Original
         </a>
       </div>
     `;
@@ -731,10 +927,10 @@ window.openReceiptModal = function (filename, itemTitle) {
   modal.classList.remove("hidden");
 };
 
-window.prefillExpenseFromPending = function (idx) {
-  const item = appState.pendingPurchases[idx];
+window.prefillExpenseFromPending = function (pendingId) {
+  const item = appState.pendingPurchases.find((p) => Number(p.id) === Number(pendingId));
   if (!item) return;
-  document.getElementById("record-resolve-pending-idx").value = String(idx);
+  document.getElementById("record-resolve-pending-idx").value = String(item.id);
   document.getElementById("resolving-pending-label").textContent = item.item;
   document.getElementById("resolving-pending-banner").classList.remove("hidden");
   document.getElementById("expense-name").value = item.item;
@@ -743,23 +939,22 @@ window.prefillExpenseFromPending = function (idx) {
   showToast(`Cargado "${item.item}" en el formulario de gasto.`);
 };
 
-window.jumpToEditExpense = function (idx) {
+window.jumpToEditExpense = function (expenseId) {
   const selectEl = document.getElementById("edit-select-expense");
   if (selectEl) {
-    selectEl.value = String(idx);
-    populateEditFormForIndex(idx);
+    selectEl.value = String(expenseId);
+    populateEditFormForId(expenseId);
   }
   switchTab("tab-edit");
 };
 
-window.handleDeletePending = async function (idx) {
+window.handleDeletePending = async function (pendingId) {
   try {
     if (appState.backendMode === "fastapi") {
-      const res = await fetch(`/api/pending/${idx}`, { method: "DELETE" });
+      const res = await fetch(`/api/pending/${pendingId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Error al eliminar pendiente.");
     } else {
-      appState.rawStore.pending_purchases.splice(idx, 1);
-      await saveStoreStatic();
+      await sbDeletePending(pendingId);
     }
     showToast("Insumo pendiente eliminado.");
     await loadState(appState.selectedWeek);
@@ -768,27 +963,31 @@ window.handleDeletePending = async function (idx) {
   }
 };
 
-window.handleDeleteExpense = async function (idx) {
+window.handleDeleteExpense = async function (expenseId) {
   const gastos = (appState.weekData && appState.weekData.gastos) || [];
-  const target = gastos[idx];
+  const target = gastos.find((g) => Number(g.id) === Number(expenseId));
   if (!target) return;
-  if (!confirm(`¿Seguro que deseas eliminar el gasto "${target.producto}" (VES ${formatNum(target.precio)})?`)) {
+  if (
+    !confirm(
+      `¿Seguro que deseas eliminar el gasto "${target.producto}" (VES ${formatNum(target.precio)})? El monto se reintegrará al Saldo Disponible.`
+    )
+  ) {
     return;
   }
 
   try {
     if (appState.backendMode === "fastapi") {
       const res = await fetch(
-        `/api/week/${appState.selectedWeek}/expenses/${idx}`,
+        `/api/week/${appState.selectedWeek}/expenses/${expenseId}`,
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error("No se pudo eliminar el gasto.");
     } else {
-      appState.weekData.gastos.splice(idx, 1);
-      normalizeWeekLocal(appState.weekData, appState.rate);
-      await saveStoreStatic();
+      const oldUsdt = Number(target.precio_usdt || 0);
+      await sbDeleteExpense(expenseId);
+      await sbAdjustGlobalBalance(oldUsdt);
     }
-    showToast(`Gasto "${target.producto}" eliminado.`);
+    showToast(`🗑️ Gasto "${target.producto}" eliminado y saldo reintegrado.`);
     await loadState(appState.selectedWeek);
   } catch (err) {
     showToast(err.message || "Error al eliminar gasto.", "error");
@@ -812,7 +1011,7 @@ async function handleFileSelection(inputEl, previewContainerId, targetKey) {
   if (rawFiles.length === 0) return;
 
   if (rawFiles.length > 3) {
-    showToast("Máximo 3 comprobantes permitidos por gasto. Se tomarán los primeros 3.", "error");
+    showToast("Máximo 3 comprobantes por gasto. Se tomarán los primeros 3.", "error");
   }
   const slice = rawFiles.slice(0, 3);
   const container = document.getElementById(previewContainerId);
@@ -850,98 +1049,162 @@ async function handleFileSelection(inputEl, previewContainerId, targetKey) {
 }
 
 // ==========================================================================
-// CLIENT-SIDE FALLBACK PDF GENERATOR (WHEN RUNNING ON GITHUB PAGES)
+// CLIENT-SIDE PDF GENERATOR WITH EMBEDDED RECEIPT PHOTOS (FOR GITHUB PAGES)
 // ==========================================================================
+async function fetchImageAsDataUrl(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
 async function generateClientSidePdf() {
   if (!window.jspdf || !window.jspdf.jsPDF) {
     showToast("Generador PDF cargando, intenta en un segundo.", "error");
     return;
   }
+  showToast("📄 Generando reporte PDF con comprobantes...");
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const w = appState.weekData;
   const m = appState.metrics;
   const r = appState.rate;
 
-  let y = 40;
+  let y = 36;
   if (appState.logoBase64) {
     try {
-      doc.addImage(`data:image/png;base64,${appState.logoBase64}`, "PNG", 40, y, 110, 36);
+      doc.addImage(
+        `data:image/png;base64,${appState.logoBase64}`,
+        "PNG",
+        36,
+        y,
+        115,
+        36
+      );
       y += 46;
     } catch (_) {}
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.text("NEXTGLOBAL - WEEKLY EXPENSE REPORT", 40, y);
-  y += 18;
+  doc.text("NEXTGLOBAL — WEEKLY EXPENSE REPORT", 36, y);
+  y += 16;
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);
   doc.text(
-    `Week ${w.numero}  |  Generated: ${nowFormatted()}  |  USDT Exchange Rate: VES ${formatNum(r)}`,
-    40,
+    `Week ${w.numero}   |   Generated: ${nowFormatted()}   |   USDT Exchange Rate: VES ${formatNum(r)}`,
+    36,
     y
   );
-  y += 16;
+  y += 14;
 
   doc.autoTable({
     startY: y,
     head: [
       [
-        "Weekly Budget",
-        "Rollover / Savings",
-        "Status",
-        "Total Spent (Gastado)",
-        "Available Balance (Disponible)",
+        "Presupuesto Semanal",
+        "Total Gastado (Semana)",
+        "Disponible de la Semana",
+        "Saldo Disponible (Caja Actual)",
       ],
     ],
     body: [
       [
-        `$${formatNum(m.weekly_budget_usdt)} USDT`,
-        `$${formatNum(m.rollover_usdt)} USDT`,
-        w.budget_funded ? "Funded" : "Not Funded",
+        `$${formatNum(m.weekly_budget_usdt)} USDT\n(VES ${formatNum(m.weekly_budget_ves)})`,
         `$${formatNum(m.total_spent_usdt)} USDT\n(VES ${formatNum(m.total_spent_ves)})`,
-        `$${formatNum(m.remaining_balance_usdt)} USDT\n(VES ${formatNum(m.remaining_balance_ves)})`,
+        `$${formatNum(m.weekly_remaining_usdt)} USDT\n(VES ${formatNum(m.weekly_remaining_ves)})`,
+        `$${formatNum(m.global_available_usdt)} USDT\n(VES ${formatNum(m.global_available_ves)})`,
       ],
     ],
     theme: "grid",
     headStyles: { fillColor: [17, 24, 39], textColor: 255, halign: "center" },
-    bodyStyles: { halign: "center", fontSize: 9 },
+    bodyStyles: { halign: "center", fontSize: 9, fontStyle: "bold" },
   });
 
   y = doc.lastAutoTable.finalY + 22;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text("Expenses Breakdown (Desglose de Gastos)", 40, y);
-  y += 10;
+  doc.text("Expenses Breakdown (Desglose de Gastos)", 36, y);
+  y += 8;
 
-  const rows = (w.gastos || []).map((g, idx) => {
+  const gastos = w.gastos || [];
+  const rows = gastos.map((g, idx) => {
     const pVes = Number(g.precio) || 0;
     const pUsdt = Number(g.precio_usdt) || (r > 0 ? pVes / r : 0);
-    const recs = Array.isArray(g.facturas)
-      ? g.facturas.filter(Boolean)
-      : g.factura
-      ? [g.factura]
-      : [];
+    const recs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : [];
     return [
       String(idx + 1),
       g.producto || "",
       `VES ${formatNum(pVes)}`,
       `$${formatNum(pUsdt)} USDT`,
-      recs.length > 0 ? `${recs.length} file(s)` : "None",
+      recs.length > 0 ? `${recs.length} adjunto(s)` : "Sin adjunto",
       g.fecha || "",
     ];
   });
 
   doc.autoTable({
     startY: y,
-    head: [["#", "Item / Service Name", "Price (VES)", "Price (USDT)", "Receipts", "Date & Time"]],
-    body: rows.length > 0 ? rows : [["—", "No expenses recorded", "—", "—", "—", "—"]],
+    head: [["#", "Insumo / Servicio", "Monto (VES)", "Monto (USDT)", "Comprobantes", "Fecha"]],
+    body: rows.length > 0 ? rows : [["—", "Sin gastos registrados en esta semana", "—", "—", "—", "—"]],
     theme: "striped",
     headStyles: { fillColor: [31, 41, 55], textColor: 255 },
     bodyStyles: { fontSize: 8.5 },
   });
+
+  // Embed receipt images in Annex page
+  const annexItems = [];
+  for (let i = 0; i < gastos.length; i++) {
+    const g = gastos[i];
+    const recs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : [];
+    for (const rFile of recs) {
+      const ext = (rFile.split(".").pop() || "").toLowerCase();
+      if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
+        const dataUrl = await fetchImageAsDataUrl(getReceiptUrl(rFile));
+        if (dataUrl) {
+          annexItems.push({
+            caption: `#${i + 1} — ${g.producto} (VES ${formatNum(g.precio)} / $${formatNum(g.precio_usdt)} USDT)`,
+            dataUrl,
+          });
+        }
+      }
+    }
+  }
+
+  if (annexItems.length > 0) {
+    doc.addPage();
+    let ay = 40;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text(`Anexo de Comprobantes — Semana ${w.numero}`, 36, ay);
+    ay += 20;
+
+    for (const item of annexItems) {
+      if (ay > 520) {
+        doc.addPage();
+        ay = 40;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(item.caption, 36, ay);
+      ay += 8;
+      try {
+        doc.addImage(item.dataUrl, "JPEG", 36, ay, 260, 210);
+        ay += 228;
+      } catch (_) {
+        ay += 20;
+      }
+    }
+  }
 
   doc.save(`Nextglobal_Expense_Report_Week_${w.numero}.pdf`);
 }
@@ -950,12 +1213,10 @@ async function generateClientSidePdf() {
 // EVENT LISTENERS INITIALIZATION
 // ==========================================================================
 document.addEventListener("DOMContentLoaded", () => {
-  // Tabs navigation
   document.querySelectorAll(".tab-btn, .mobile-nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
-  // Modal close
   document.getElementById("btn-close-modal").addEventListener("click", () => {
     document.getElementById("receipt-modal").classList.add("hidden");
   });
@@ -978,9 +1239,7 @@ document.addEventListener("DOMContentLoaded", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ password: pass }),
         });
-        if (!res.ok) {
-          throw new Error("Contraseña incorrecta. Intenta de nuevo.");
-        }
+        if (!res.ok) throw new Error("Contraseña incorrecta. Intenta de nuevo.");
       } else if (pass !== DEFAULT_PASS) {
         throw new Error("Contraseña incorrecta. Intenta de nuevo.");
       }
@@ -1005,7 +1264,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderAll();
   });
 
-  // Public & Sidebar Add Pending Purchase
+  // Add Pending Purchase
   async function submitPendingItem(nameInputId, prioSelectId) {
     const nameEl = document.getElementById(nameInputId);
     const prioEl = document.getElementById(prioSelectId);
@@ -1022,13 +1281,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         if (!res.ok) throw new Error("Error al guardar pendiente.");
       } else {
-        appState.rawStore.pending_purchases.push({
-          item,
-          priority,
-          notes: "",
-          date_added: nowFormatted(),
-        });
-        await saveStoreStatic();
+        await sbInsertPending(item, priority);
       }
       nameEl.value = "";
       showToast(`"${item}" añadido a compras pendientes.`);
@@ -1077,16 +1330,19 @@ document.addEventListener("DOMContentLoaded", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ funded: newFunded }),
         });
-        if (!res.ok) throw new Error("No se pudo actualizar el estado de fondeo.");
+        if (!res.ok) throw new Error("No se pudo actualizar el fondeo.");
       } else {
+        const baseB = Number(appState.weekData.presupuesto_base || 25.0);
+        const delta = newFunded ? baseB : -baseB;
+        const newGlobalAvail = await sbAdjustGlobalBalance(delta);
         appState.weekData.budget_funded = newFunded;
-        normalizeWeekLocal(appState.weekData, appState.rate);
-        await saveStoreStatic();
+        appState.weekData.presupuesto_disponible = newGlobalAvail;
+        await sbUpsertWeekRow(appState.weekData);
       }
       showToast(
         newFunded
-          ? "✅ Presupuesto semanal sumado al disponible."
-          : "ℹ️ Fondeo semanal revertido."
+          ? "✅ Presupuesto semanal sumado al Saldo Disponible."
+          : "ℹ️ Fondeo semanal revertido del Saldo Disponible."
       );
       await loadState(appState.selectedWeek);
     } catch (err) {
@@ -1134,7 +1390,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const priceVes = Number(
         document.getElementById("expense-price-ves").value
       );
-      const resolveIdxRaw = document.getElementById(
+      const resolvePendingId = document.getElementById(
         "record-resolve-pending-idx"
       ).value;
 
@@ -1144,15 +1400,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       btn.disabled = true;
-      btn.textContent = "⏳ Guardando gasto y subiendo comprobantes...";
+      btn.textContent = "⏳ Guardando en Supabase y subiendo comprobante...";
 
       try {
         if (appState.backendMode === "fastapi") {
           const fd = new FormData();
           fd.append("producto", name);
           fd.append("precio", String(priceVes));
-          if (resolveIdxRaw !== "") {
-            fd.append("resolve_pending_index", resolveIdxRaw);
+          if (resolvePendingId !== "") {
+            fd.append("resolve_pending_id", resolvePendingId);
           }
           for (const item of appState.recordCompressedFiles) {
             fd.append("receipts", item.file, item.file.name);
@@ -1166,37 +1422,33 @@ document.addEventListener("DOMContentLoaded", () => {
           );
           if (!res.ok) throw new Error("Error guardando gasto en el servidor.");
         } else {
-          const uploadedNames = [];
+          const uploadedUrls = [];
           for (const item of appState.recordCompressedFiles) {
-            const ext = (item.file.name.split(".").pop() || "jpg").toLowerCase();
-            const rName = `receipt_wk${appState.selectedWeek}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
-            if (appState.supabaseClient) {
-              await appState.supabaseClient.storage
-                .from("receipts")
-                .upload(rName, item.file, { upsert: true });
-            }
-            uploadedNames.push(rName);
+            const pubUrl = await sbUploadReceiptFile(
+              appState.selectedWeek,
+              item.file
+            );
+            uploadedUrls.push(pubUrl);
           }
           const pUsdt =
             appState.rate > 0
               ? Number((priceVes / appState.rate).toFixed(2))
               : 0;
-          appState.weekData.gastos.push({
-            producto: name,
-            precio: priceVes,
-            precio_usdt: pUsdt,
-            factura: uploadedNames[0] || null,
-            facturas: uploadedNames,
-            fecha: nowFormatted(),
-          });
-          if (resolveIdxRaw !== "") {
-            const rIdx = Number(resolveIdxRaw);
-            if (rIdx >= 0 && rIdx < appState.rawStore.pending_purchases.length) {
-              appState.rawStore.pending_purchases.splice(rIdx, 1);
-            }
+          const facturaStr =
+            uploadedUrls.length > 0 ? uploadedUrls.join("|") : null;
+
+          await sbInsertExpense(
+            appState.selectedWeek,
+            name,
+            priceVes,
+            pUsdt,
+            facturaStr
+          );
+          await sbAdjustGlobalBalance(-pUsdt);
+
+          if (resolvePendingId !== "") {
+            await sbDeletePending(Number(resolvePendingId));
           }
-          normalizeWeekLocal(appState.weekData, appState.rate);
-          await saveStoreStatic();
         }
 
         // Reset form
@@ -1210,7 +1462,7 @@ document.addEventListener("DOMContentLoaded", () => {
           .classList.add("hidden");
         appState.recordCompressedFiles = [];
 
-        showToast(`✅ Registrado "${name}" por VES ${formatNum(priceVes)}`);
+        showToast(`✅ Guardado "${name}" en Supabase (VES ${formatNum(priceVes)})`);
         await loadState(appState.selectedWeek);
       } catch (err) {
         showToast(err.message || "Error al guardar gasto.", "error");
@@ -1224,7 +1476,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("edit-select-expense")
     .addEventListener("change", (e) => {
-      populateEditFormForIndex(Number(e.target.value) || 0);
+      populateEditFormForId(Number(e.target.value));
     });
 
   // Edit Expense Submit
@@ -1232,7 +1484,9 @@ document.addEventListener("DOMContentLoaded", () => {
     .getElementById("form-edit-expense")
     .addEventListener("submit", async (e) => {
       e.preventDefault();
-      const idx = Number(document.getElementById("edit-select-expense").value);
+      const expenseId = Number(
+        document.getElementById("edit-select-expense").value
+      );
       const name = document.getElementById("edit-expense-name").value.trim();
       const priceVes = Number(
         document.getElementById("edit-expense-price").value
@@ -1245,7 +1499,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       btn.disabled = true;
-      btn.textContent = "⏳ Actualizando...";
+      btn.textContent = "⏳ Actualizando en Supabase...";
 
       try {
         if (appState.backendMode === "fastapi") {
@@ -1257,7 +1511,7 @@ document.addEventListener("DOMContentLoaded", () => {
             fd.append("receipts", item.file, item.file.name);
           }
           const res = await fetch(
-            `/api/week/${appState.selectedWeek}/expenses/${idx}`,
+            `/api/week/${appState.selectedWeek}/expenses/${expenseId}`,
             {
               method: "PUT",
               body: fd,
@@ -1265,37 +1519,38 @@ document.addEventListener("DOMContentLoaded", () => {
           );
           if (!res.ok) throw new Error("No se pudo actualizar el gasto.");
         } else {
-          const target = appState.weekData.gastos[idx];
+          const gastos = (appState.weekData && appState.weekData.gastos) || [];
+          const target = gastos.find((g) => Number(g.id) === expenseId);
+          if (!target) throw new Error("Gasto no encontrado.");
+
+          const oldUsdt = Number(target.precio_usdt || 0);
+          let finalUrls = Array.isArray(target.facturas) ? target.facturas : [];
+
           if (appState.editCompressedFiles.length > 0) {
-            const uploadedNames = [];
+            finalUrls = [];
             for (const item of appState.editCompressedFiles) {
-              const ext = (
-                item.file.name.split(".").pop() || "jpg"
-              ).toLowerCase();
-              const rName = `receipt_wk${appState.selectedWeek}_${Date.now()}.${ext}`;
-              if (appState.supabaseClient) {
-                await appState.supabaseClient.storage
-                  .from("receipts")
-                  .upload(rName, item.file, { upsert: true });
-              }
-              uploadedNames.push(rName);
+              const pubUrl = await sbUploadReceiptFile(
+                appState.selectedWeek,
+                item.file
+              );
+              finalUrls.push(pubUrl);
             }
-            target.facturas = uploadedNames;
-            target.factura = uploadedNames[0] || null;
           }
-          target.producto = name;
-          target.precio = priceVes;
-          target.precio_usdt =
+
+          const newUsdt =
             appState.rate > 0
               ? Number((priceVes / appState.rate).toFixed(2))
               : 0;
-          normalizeWeekLocal(appState.weekData, appState.rate);
-          await saveStoreStatic();
+          const facturaStr = finalUrls.length > 0 ? finalUrls.join("|") : null;
+
+          await sbUpdateExpense(expenseId, name, priceVes, newUsdt, facturaStr);
+          const deltaUsdt = Number((oldUsdt - newUsdt).toFixed(2));
+          await sbAdjustGlobalBalance(deltaUsdt);
         }
 
         appState.editCompressedFiles = [];
         document.getElementById("edit-file-previews").innerHTML = "";
-        showToast(`✅ Gasto "${name}" actualizado.`);
+        showToast(`✅ Gasto "${name}" actualizado en Supabase.`);
         await loadState(appState.selectedWeek);
       } catch (err) {
         showToast(err.message || "Error al actualizar gasto.", "error");
@@ -1309,8 +1564,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("btn-delete-selected-expense")
     .addEventListener("click", () => {
-      const idx = Number(document.getElementById("edit-select-expense").value);
-      window.handleDeleteExpense(idx);
+      const expenseId = Number(
+        document.getElementById("edit-select-expense").value
+      );
+      window.handleDeleteExpense(expenseId);
     });
 
   // Download PDF & CSV
@@ -1328,7 +1585,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     const w = appState.weekData;
-    const lines = ["#,Item / Service,Price (VES),Price (USDT),Date & Time"];
+    const lines = ["#,Item / Service,Price (VES),Price (USDT),Date"];
     (w.gastos || []).forEach((g, idx) => {
       const pVes = Number(g.precio) || 0;
       const pUsdt =
@@ -1346,13 +1603,15 @@ document.addEventListener("DOMContentLoaded", () => {
     a.click();
   });
 
-  // Financial Settings Save
+  // Financial Settings Save (Weekly Budget + Global Saldo Disponible)
   document
     .getElementById("form-week-settings")
     .addEventListener("submit", async (e) => {
       e.preventDefault();
       const base = Number(document.getElementById("setting-base-budget").value);
-      const roll = Number(document.getElementById("setting-rollover").value);
+      const globalBal = Number(
+        document.getElementById("setting-global-balance").value
+      );
 
       try {
         if (appState.backendMode === "fastapi") {
@@ -1363,40 +1622,22 @@ document.addEventListener("DOMContentLoaded", () => {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 presupuesto_base: base,
-                remanente_anterior: roll,
+                saldo_disponible: globalBal,
               }),
             }
           );
           if (!res.ok) throw new Error("Error guardando configuración.");
         } else {
+          await sbSetGlobalBalance(globalBal, base);
           appState.weekData.presupuesto_base = base;
-          appState.weekData.remanente_anterior = roll;
-          normalizeWeekLocal(appState.weekData, appState.rate);
-          await saveStoreStatic();
+          appState.weekData.presupuesto_disponible = globalBal;
+          appState.weekData.remanente_anterior = globalBal;
+          await sbUpsertWeekRow(appState.weekData);
         }
-        showToast("✅ Presupuesto y Remanente actualizados.");
+        showToast("✅ Presupuesto Semanal y Saldo Disponible Global actualizados.");
         await loadState(appState.selectedWeek);
       } catch (err) {
         showToast(err.message || "Error al actualizar ajustes.", "error");
-      }
-    });
-
-  // Recalculate Rollover from Previous Week
-  document
-    .getElementById("btn-recalc-rollover")
-    .addEventListener("click", async () => {
-      try {
-        if (appState.backendMode === "fastapi") {
-          const res = await fetch(
-            `/api/week/${appState.selectedWeek}/recalculate-rollover`,
-            { method: "POST" }
-          );
-          if (!res.ok) throw new Error("No se pudo recalcular el remanente.");
-        }
-        showToast("🔄 Remanente recalculado desde la semana anterior.");
-        await loadState(appState.selectedWeek);
-      } catch (err) {
-        showToast(err.message || "Error al recalcular remanente.", "error");
       }
     });
 
@@ -1437,7 +1678,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const res = await fetch("/api/rate/sync", { method: "POST" });
         if (!res.ok) throw new Error("Error sincronizando tasa.");
       } else {
-        await fetchLiveRateStatic();
+        await fetchLiveRateClient();
       }
       await loadState(appState.selectedWeek);
       showToast(`✅ Tasa actualizada: VES ${formatNum(appState.rate)}`);

@@ -1,5 +1,4 @@
 import base64
-import copy
 import io
 import json
 import mimetypes
@@ -14,7 +13,7 @@ import urllib3
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from PIL import Image as PILImage
 from pydantic import BaseModel
 from reportlab.lib import colors
@@ -30,6 +29,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==============================================================================
@@ -38,7 +38,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 BASE_DIR = Path(__file__).resolve().parent
 CARPETA_ADJUNTOS = BASE_DIR / "adjuntos"
 CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
-LOCAL_BACKUP_FILE = CARPETA_ADJUNTOS / "local_backup.json"
 
 NG_SUPABASE_URL = os.environ.get(
     "SUPABASE_URL", "https://aswdqhmityjxyerblsfo.supabase.co"
@@ -47,10 +46,17 @@ NG_SUPABASE_KEY = os.environ.get(
     "SUPABASE_KEY", "sb_publishable_zOQEgkqE7PcpsqTOFUWN2w_Om3JjrxJ"
 )
 NXT_ACCESS_PASSWORD = os.environ.get("NXT_PASSWORD", "Ng90071")
+STORAGE_BUCKET = "recibos"
 
 
-class SupabaseGateway:
-    """Direct HTTP client for Supabase PostgREST and Storage compatible with both sb_publishable and JWT keys."""
+class SupabaseRelationalGateway:
+    """
+    Direct HTTP client for Nextglobal's real Supabase schema:
+      - Table 'semanas' (numero=0 stores global Saldo Disponible state; numero>=41 stores each week)
+      - Table 'gastos' (id, semana_numero, producto, precio, precio_usdt, factura, fecha)
+      - Table 'pending_purchases' (id, item, priority, notes, date_added)
+      - Storage bucket 'recibos'
+    """
 
     def __init__(self, base_url: str, api_key: str):
         self.base_url = base_url.rstrip("/")
@@ -65,55 +71,212 @@ class SupabaseGateway:
             h.update(extra)
         return h
 
-    def fetch_app_data(self) -> Optional[dict]:
-        url = f"{self.base_url}/rest/v1/app_data?id=eq.1&select=content"
-        res = requests.get(url, headers=self._headers(), timeout=5)
+    # --- GLOBAL BALANCE (ROW numero = 0 IN semanas) ---
+    def get_global_row(self, default_budget: float = 25.0, default_balance: float = 60.0) -> dict:
+        url = f"{self.base_url}/rest/v1/semanas?numero=eq.0&select=*"
+        res = requests.get(url, headers=self._headers(), timeout=6)
         if res.status_code == 200:
             rows = res.json()
             if isinstance(rows, list) and len(rows) > 0:
-                return rows[0].get("content")
+                return rows[0]
+
+        payload = {
+            "numero": 0,
+            "presupuesto_base": default_budget,
+            "remanente_anterior": default_balance,
+            "budget_funded": False,
+            "presupuesto_disponible": default_balance,
+            "total_gastado": 0.0,
+        }
+        self.upsert_week_row(payload)
+        return payload
+
+    def set_global_available_balance(self, new_balance_usdt: float, default_budget: Optional[float] = None) -> dict:
+        row = self.get_global_row()
+        bal = round(float(new_balance_usdt), 2)
+        base_b = round(float(default_budget), 2) if default_budget is not None else float(row.get("presupuesto_base", 25.0))
+        payload = {
+            "numero": 0,
+            "presupuesto_base": base_b,
+            "remanente_anterior": bal,
+            "budget_funded": False,
+            "presupuesto_disponible": bal,
+            "total_gastado": 0.0,
+        }
+        return self.upsert_week_row(payload)
+
+    def adjust_global_available_balance(self, delta_usdt: float) -> float:
+        row = self.get_global_row()
+        current_bal = float(row.get("presupuesto_disponible", 60.0))
+        new_bal = round(current_bal + float(delta_usdt), 2)
+        self.set_global_available_balance(new_bal)
+        return new_bal
+
+    # --- WEEKS (TABLE semanas) ---
+    def list_weeks(self) -> List[dict]:
+        url = f"{self.base_url}/rest/v1/semanas?numero=gte.41&select=*&order=numero.asc"
+        res = requests.get(url, headers=self._headers(), timeout=6)
+        if res.status_code == 200 and isinstance(res.json(), list):
+            return res.json()
+        return []
+
+    def get_week_row(self, week_num: int) -> Optional[dict]:
+        url = f"{self.base_url}/rest/v1/semanas?numero=eq.{int(week_num)}&select=*"
+        res = requests.get(url, headers=self._headers(), timeout=6)
+        if res.status_code == 200:
+            rows = res.json()
+            if isinstance(rows, list) and len(rows) > 0:
+                return rows[0]
         return None
 
-    def upsert_app_data(self, content: dict) -> bool:
-        url = f"{self.base_url}/rest/v1/app_data"
+    def upsert_week_row(self, week_payload: dict) -> dict:
+        url = f"{self.base_url}/rest/v1/semanas?on_conflict=numero"
         headers = self._headers(
             {
                 "Content-Type": "application/json",
-                "Prefer": "resolution=merge-duplicates",
+                "Prefer": "return=representation,resolution=merge-duplicates",
             }
         )
-        res = requests.post(
-            url, json={"id": 1, "content": content}, headers=headers, timeout=5
-        )
-        return res.status_code in (200, 201, 204)
+        clean = {
+            "numero": int(week_payload["numero"]),
+            "presupuesto_base": round(float(week_payload.get("presupuesto_base", 25.0)), 2),
+            "remanente_anterior": round(float(week_payload.get("remanente_anterior", 0.0)), 2),
+            "budget_funded": bool(week_payload.get("budget_funded", False)),
+            "presupuesto_disponible": round(float(week_payload.get("presupuesto_disponible", 0.0)), 2),
+            "total_gastado": round(float(week_payload.get("total_gastado", 0.0)), 2),
+        }
+        res = requests.post(url, json=clean, headers=headers, timeout=6)
+        if res.status_code in (200, 201):
+            rows = res.json()
+            if isinstance(rows, list) and len(rows) > 0:
+                return rows[0]
+        return clean
 
-    def upload_receipt(self, filename: str, raw_bytes: bytes) -> bool:
-        mime_type, _ = mimetypes.guess_type(filename)
-        url = f"{self.base_url}/storage/v1/object/receipts/{filename}"
+    # --- EXPENSES (TABLE gastos) ---
+    def get_expenses_for_week(self, week_num: int) -> List[dict]:
+        url = f"{self.base_url}/rest/v1/gastos?semana_numero=eq.{int(week_num)}&select=*&order=id.asc"
+        res = requests.get(url, headers=self._headers(), timeout=6)
+        if res.status_code == 200 and isinstance(res.json(), list):
+            return res.json()
+        return []
+
+    def insert_expense(self, week_num: int, producto: str, precio: float, precio_usdt: float, factura_str: Optional[str], fecha_str: str) -> dict:
+        url = f"{self.base_url}/rest/v1/gastos"
         headers = self._headers(
             {
-                "Content-Type": mime_type or "application/octet-stream",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            }
+        )
+        payload = {
+            "semana_numero": int(week_num),
+            "producto": producto,
+            "precio": round(float(precio), 2),
+            "precio_usdt": round(float(precio_usdt), 2),
+            "factura": factura_str,
+            "fecha": fecha_str,
+        }
+        res = requests.post(url, json=payload, headers=headers, timeout=6)
+        if res.status_code in (200, 201) and isinstance(res.json(), list) and res.json():
+            return res.json()[0]
+        raise HTTPException(status_code=500, detail=f"Error guardando gasto en Supabase: {res.text}")
+
+    def update_expense_by_id(self, expense_id: int, producto: str, precio: float, precio_usdt: float, factura_str: Optional[str]) -> dict:
+        url = f"{self.base_url}/rest/v1/gastos?id=eq.{int(expense_id)}"
+        headers = self._headers(
+            {
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            }
+        )
+        payload = {
+            "producto": producto,
+            "precio": round(float(precio), 2),
+            "precio_usdt": round(float(precio_usdt), 2),
+            "factura": factura_str,
+        }
+        res = requests.patch(url, json=payload, headers=headers, timeout=6)
+        if res.status_code in (200, 201) and isinstance(res.json(), list) and res.json():
+            return res.json()[0]
+        raise HTTPException(status_code=500, detail=f"Error actualizando gasto en Supabase: {res.text}")
+
+    def delete_expense_by_id(self, expense_id: int) -> bool:
+        url = f"{self.base_url}/rest/v1/gastos?id=eq.{int(expense_id)}"
+        res = requests.delete(url, headers=self._headers(), timeout=6)
+        return res.status_code in (200, 204)
+
+    # --- PENDING PURCHASES (TABLE pending_purchases) ---
+    def list_pending(self) -> List[dict]:
+        url = f"{self.base_url}/rest/v1/pending_purchases?select=*&order=id.asc"
+        res = requests.get(url, headers=self._headers(), timeout=6)
+        if res.status_code == 200 and isinstance(res.json(), list):
+            return res.json()
+        return []
+
+    def insert_pending(self, item: str, priority: str, notes: str = "") -> dict:
+        url = f"{self.base_url}/rest/v1/pending_purchases"
+        headers = self._headers(
+            {
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            }
+        )
+        payload = {
+            "item": item,
+            "priority": priority,
+            "notes": notes,
+            "date_added": datetime.now().strftime("%Y-%m-%d"),
+        }
+        res = requests.post(url, json=payload, headers=headers, timeout=6)
+        if res.status_code in (200, 201) and isinstance(res.json(), list) and res.json():
+            return res.json()[0]
+        raise HTTPException(status_code=500, detail="No se pudo guardar en pending_purchases.")
+
+    def delete_pending_by_id(self, pending_id: int) -> bool:
+        url = f"{self.base_url}/rest/v1/pending_purchases?id=eq.{int(pending_id)}"
+        res = requests.delete(url, headers=self._headers(), timeout=6)
+        return res.status_code in (200, 204)
+
+    # --- RECEIPT STORAGE (BUCKET recibos) ---
+    def upload_receipt(self, filename: str, raw_bytes: bytes) -> str:
+        mime_type, _ = mimetypes.guess_type(filename)
+        url = f"{self.base_url}/storage/v1/object/{STORAGE_BUCKET}/{filename}"
+        headers = self._headers(
+            {
+                "Content-Type": mime_type or "image/jpeg",
                 "x-upsert": "true",
             }
         )
-        res = requests.post(url, data=raw_bytes, headers=headers, timeout=10)
-        return res.status_code in (200, 201)
+        res = requests.post(url, data=raw_bytes, headers=headers, timeout=12)
+        if res.status_code not in (200, 201):
+            raise HTTPException(status_code=500, detail=f"Error subiendo comprobante a Supabase Storage: {res.text}")
+        return self.get_public_url(filename)
 
-    def download_receipt(self, filename: str) -> Optional[bytes]:
-        for path in [
-            f"{self.base_url}/storage/v1/object/public/receipts/{filename}",
-            f"{self.base_url}/storage/v1/object/receipts/{filename}",
-        ]:
-            res = requests.get(path, headers=self._headers(), timeout=8)
-            if res.status_code == 200 and res.content:
-                return res.content
+    def download_receipt(self, file_ref: str) -> Optional[bytes]:
+        safe_name = Path(file_ref.split("?")[0]).name
+        candidates = [
+            f"{self.base_url}/storage/v1/object/public/{STORAGE_BUCKET}/{safe_name}",
+            f"{self.base_url}/storage/v1/object/{STORAGE_BUCKET}/{safe_name}",
+        ]
+        if file_ref.startswith("http"):
+            candidates.insert(0, file_ref)
+        for url in candidates:
+            try:
+                res = requests.get(url, headers=self._headers(), timeout=8)
+                if res.status_code == 200 and res.content:
+                    return res.content
+            except Exception:
+                pass
         return None
 
-    def get_public_url(self, filename: str) -> str:
-        return f"{self.base_url}/storage/v1/object/public/receipts/{filename}"
+    def get_public_url(self, file_ref: str) -> str:
+        if file_ref.startswith("http"):
+            return file_ref
+        safe_name = Path(file_ref).name
+        return f"{self.base_url}/storage/v1/object/public/{STORAGE_BUCKET}/{safe_name}"
 
 
-supabase_gw = SupabaseGateway(NG_SUPABASE_URL, NG_SUPABASE_KEY)
+supabase_gw = SupabaseRelationalGateway(NG_SUPABASE_URL, NG_SUPABASE_KEY)
 
 LOGO_FILE = BASE_DIR / "logo.txt"
 NG_LOGO_BASE64 = ""
@@ -129,7 +292,7 @@ if LOGO_FILE.exists():
 app = FastAPI(
     title="NXTsavings — Nextglobal Petty Cash & Weekly Budget Record",
     description="Sistema ágil de registro de caja chica, control semanal en USDT/VES y reportes PDF.",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 app.add_middleware(
@@ -225,147 +388,95 @@ def get_active_rate(force_refresh: bool = False) -> dict:
     return _RATE_STATE
 
 
-# ==============================================================================
-# DATA PERSISTENCE LAYER (SUPABASE + LOCAL FALLBACK)
-# ==============================================================================
-_MEMORY_STORE = {"semanas": [], "pending_purchases": []}
-
-
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
     return max(41, current_iso_week)
 
 
-def load_data() -> dict:
-    global _MEMORY_STORE
-    try:
-        content = supabase_gw.fetch_app_data()
-        if isinstance(content, dict):
-            content.setdefault("semanas", [])
-            content.setdefault("pending_purchases", [])
-            _MEMORY_STORE = content
-            try:
-                LOCAL_BACKUP_FILE.write_text(
-                    json.dumps(content, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-            except Exception:
-                pass
-            return content
-    except Exception:
-        pass
-
-    if LOCAL_BACKUP_FILE.exists():
-        try:
-            local_content = json.loads(
-                LOCAL_BACKUP_FILE.read_text(encoding="utf-8")
-            )
-            if isinstance(local_content, dict):
-                local_content.setdefault("semanas", [])
-                local_content.setdefault("pending_purchases", [])
-                _MEMORY_STORE = local_content
-                return local_content
-        except Exception:
-            pass
-
-    return _MEMORY_STORE
+def parse_facturas_field(raw_factura: Optional[str]) -> List[str]:
+    if not raw_factura:
+        return []
+    parts = [p.strip() for p in str(raw_factura).split("|") if p.strip()]
+    return parts
 
 
-def save_data(data: dict) -> bool:
-    global _MEMORY_STORE
-    _MEMORY_STORE = data
-    try:
-        LOCAL_BACKUP_FILE.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+def build_week_state(week_num: int, rate: float) -> tuple[dict, float]:
+    """
+    Loads (or initializes) week `week_num` from Supabase `semanas` and its expenses from `gastos`,
+    plus the global `Saldo Disponible` from `semanas` (numero=0).
+    """
+    global_row = supabase_gw.get_global_row(default_budget=25.0, default_balance=60.0)
+    global_available_usdt = round(float(global_row.get("presupuesto_disponible", 60.0)), 2)
+    default_base_budget = round(float(global_row.get("presupuesto_base", 25.0)), 2)
+
+    week_row = supabase_gw.get_week_row(week_num)
+    if week_row is None:
+        week_row = supabase_gw.upsert_week_row(
+            {
+                "numero": int(week_num),
+                "presupuesto_base": default_base_budget,
+                "remanente_anterior": global_available_usdt,
+                "budget_funded": False,
+                "presupuesto_disponible": global_available_usdt,
+                "total_gastado": 0.0,
+            }
         )
-    except Exception:
-        pass
 
-    try:
-        return supabase_gw.upsert_app_data(data)
-    except Exception:
-        return False
-
-
-def normalize_week(sem: dict, rate: float) -> dict:
-    """Ensures a week record has consistent fields and calculated metrics."""
-    sem.setdefault("presupuesto_base", 25.0)
-    sem.setdefault("remanente_anterior", 60.0)
-    sem.setdefault("budget_funded", False)
-    sem.setdefault("gastos", [])
-
-    # Normalize each expense to always have both 'factura' and 'facturas'
+    raw_expenses = supabase_gw.get_expenses_for_week(week_num)
+    gastos = []
     total_ves = 0.0
-    for idx, g in enumerate(sem["gastos"]):
-        precio_val = float(g.get("precio", 0.0))
-        total_ves += precio_val
-        facturas_list = g.get("facturas")
-        if not isinstance(facturas_list, list):
-            facturas_list = [g["factura"]] if g.get("factura") else []
-        facturas_list = [f for f in facturas_list if f]
-        g["facturas"] = facturas_list
-        g["factura"] = facturas_list[0] if facturas_list else None
-        if "precio_usdt" not in g or g["precio_usdt"] is None:
-            g["precio_usdt"] = round(precio_val / rate, 2) if rate > 0 else 0.0
+    total_usdt = 0.0
 
-    sem["total_gastado"] = round(total_ves, 2)
-    base_amount = float(sem["presupuesto_base"]) if sem.get("budget_funded") else 0.0
-    sem["presupuesto_disponible"] = round(
-        base_amount + float(sem["remanente_anterior"]), 2
-    )
-    return sem
+    for g in raw_expenses:
+        p_ves = round(float(g.get("precio", 0.0)), 2)
+        p_usdt = round(float(g.get("precio_usdt") or (p_ves / rate if rate > 0 else 0.0)), 2)
+        total_ves += p_ves
+        total_usdt += p_usdt
+        facturas_list = parse_facturas_field(g.get("factura"))
+        gastos.append(
+            {
+                "id": g.get("id"),
+                "semana_numero": int(week_num),
+                "producto": g.get("producto", ""),
+                "precio": p_ves,
+                "precio_usdt": p_usdt,
+                "factura": facturas_list[0] if facturas_list else None,
+                "facturas": facturas_list,
+                "fecha": g.get("fecha", ""),
+            }
+        )
 
+    total_ves = round(total_ves, 2)
+    if abs(float(week_row.get("total_gastado", 0.0)) - total_ves) > 0.01:
+        week_row["total_gastado"] = total_ves
+        week_row["presupuesto_disponible"] = global_available_usdt
+        supabase_gw.upsert_week_row(week_row)
 
-def get_or_create_week(
-    data: dict, week_num: int, rate: float, base_budget: float = 25.0, initial_savings: float = 60.0
-) -> dict:
-    for sem in data["semanas"]:
-        if int(sem.get("numero", 0)) == int(week_num):
-            return normalize_week(sem, rate)
-
-    valid_weeks = sorted(
-        [s for s in data["semanas"] if int(s.get("numero", 0)) >= 41],
-        key=lambda x: int(x.get("numero", 0)),
-    )
-
-    # Find the closest preceding week to compute rollover
-    prev_weeks = [s for s in valid_weeks if int(s.get("numero", 0)) < int(week_num)]
-    if not prev_weeks and not valid_weeks:
-        rollover = initial_savings
-    else:
-        prev = prev_weeks[-1] if prev_weeks else valid_weeks[-1]
-        prev = normalize_week(prev, rate)
-        spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0.0
-        prev_is_funded = prev.get("budget_funded", False)
-        prev_base = float(prev["presupuesto_base"]) if prev_is_funded else 0.0
-        prev_available = prev_base + float(prev["remanente_anterior"])
-        rollover = round(prev_available - spent_usdt, 2)
-
-    new_week = {
+    week_dict = {
+        "id": week_row.get("id"),
         "numero": int(week_num),
-        "presupuesto_base": base_budget,
-        "remanente_anterior": rollover,
-        "budget_funded": False,
-        "presupuesto_disponible": rollover,
-        "gastos": [],
-        "total_gastado": 0.0,
+        "presupuesto_base": round(float(week_row.get("presupuesto_base", default_base_budget)), 2),
+        "remanente_anterior": global_available_usdt,
+        "budget_funded": bool(week_row.get("budget_funded", False)),
+        "presupuesto_disponible": global_available_usdt,
+        "total_gastado": total_ves,
+        "total_gastado_usdt": round(total_usdt, 2),
+        "gastos": gastos,
     }
-    data["semanas"].append(new_week)
-    save_data(data)
-    return normalize_week(new_week, rate)
+    return week_dict, global_available_usdt
 
 
-def ensure_receipt_cached_locally(filename: str) -> Optional[Path]:
-    """Ensures a receipt exists in CARPETA_ADJUNTOS, downloading from Supabase if needed."""
-    if not filename:
+def ensure_receipt_cached_locally(file_ref: str) -> Optional[Path]:
+    """Ensures a receipt exists in CARPETA_ADJUNTOS, downloading from Supabase 'recibos' if needed."""
+    if not file_ref:
         return None
-    safe_name = Path(filename).name
+    safe_name = Path(file_ref.split("?")[0]).name
     local_path = CARPETA_ADJUNTOS / safe_name
     if local_path.exists() and local_path.stat().st_size > 0:
         return local_path
 
     try:
-        file_bytes = supabase_gw.download_receipt(safe_name)
+        file_bytes = supabase_gw.download_receipt(file_ref)
         if file_bytes:
             local_path.write_bytes(file_bytes)
             return local_path
@@ -377,7 +488,7 @@ def ensure_receipt_cached_locally(filename: str) -> Optional[Path]:
 # ==============================================================================
 # PDF REPORT GENERATOR (REPORTLAB WITH EMBEDDED RECEIPTS & LOGO)
 # ==============================================================================
-def generate_pdf_report(week_data: dict, rate: float) -> bytes:
+def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: float) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -390,7 +501,6 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
     styles = getSampleStyleSheet()
     story = []
 
-    # Optional Nextglobal Logo Header
     if NG_LOGO_BASE64:
         try:
             raw_logo = base64.b64decode(NG_LOGO_BASE64)
@@ -440,36 +550,29 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
     )
     story.append(Spacer(1, 14))
 
-    is_funded = week_data.get("budget_funded", False)
-    funded_text = "Funded (Transferido)" if is_funded else "Not Funded (Pendiente)"
-
+    weekly_budget_usdt = float(week_data["presupuesto_base"])
     total_spent_ves = float(week_data.get("total_gastado", 0.0))
-    total_spent_usdt = total_spent_ves / rate if rate > 0 else 0.0
-
-    base_amount = float(week_data["presupuesto_base"]) if is_funded else 0.0
-    available_budget = base_amount + float(week_data["remanente_anterior"])
-
-    rem_usdt = available_budget - total_spent_usdt
-    rem_ves = rem_usdt * rate
+    total_spent_usdt = round(total_spent_ves / rate, 2) if rate > 0 else 0.0
+    weekly_remaining_usdt = round(weekly_budget_usdt - total_spent_usdt, 2)
+    weekly_remaining_ves = round(weekly_remaining_usdt * rate, 2)
+    global_available_ves = round(global_available_usdt * rate, 2)
 
     summary_data = [
         [
-            "Weekly Budget",
-            "Rollover / Savings",
-            "Status",
-            "Total Spent (Gastado)",
-            "Available Balance (Disponible)",
+            "Presupuesto Semanal",
+            "Total Gastado (Semana)",
+            "Disponible de la Semana",
+            "Saldo Disponible (Caja Actual)",
         ],
         [
-            f"${float(week_data['presupuesto_base']):.2f} USDT",
-            f"${float(week_data['remanente_anterior']):.2f} USDT",
-            funded_text,
+            f"${weekly_budget_usdt:.2f} USDT\n(VES {weekly_budget_usdt * rate:,.2f})",
             f"${total_spent_usdt:.2f} USDT\n(VES {total_spent_ves:,.2f})",
-            f"${rem_usdt:.2f} USDT\n(VES {rem_ves:,.2f})",
+            f"${weekly_remaining_usdt:.2f} USDT\n(VES {weekly_remaining_ves:,.2f})",
+            f"${global_available_usdt:.2f} USDT\n(VES {global_available_ves:,.2f})",
         ],
     ]
 
-    summary_table = Table(summary_data, colWidths=[95, 100, 95, 125, 125])
+    summary_table = Table(summary_data, colWidths=[130, 135, 135, 140])
     summary_table.setStyle(
         TableStyle(
             [
@@ -482,9 +585,9 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
                 ("TOPPADDING", (0, 0), (-1, -1), 7),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
                 ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#F3F4F6")),
-                ("TEXTCOLOR", (3, 1), (3, 1), colors.HexColor("#DC2626")),
-                ("TEXTCOLOR", (4, 1), (4, 1), colors.HexColor("#059669")),
-                ("FONTNAME", (3, 1), (4, 1), "Helvetica-Bold"),
+                ("TEXTCOLOR", (1, 1), (1, 1), colors.HexColor("#DC2626")),
+                ("TEXTCOLOR", (3, 1), (3, 1), colors.HexColor("#059669")),
+                ("FONTNAME", (1, 1), (3, 1), "Helvetica-Bold"),
                 ("GRID", (0, 0), (-1, -1), 0.75, colors.HexColor("#D1D5DB")),
             ]
         )
@@ -510,7 +613,7 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
                 "Price (VES)",
                 "Price (USDT)",
                 "Receipts",
-                "Date & Time",
+                "Date",
             ]
         ]
         for idx, g in enumerate(expenses, 1):
@@ -518,15 +621,13 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
             p_usdt = float(
                 g.get("precio_usdt", p_ves / rate if rate > 0 else 0.0)
             )
-            receipts = g.get(
-                "facturas", [g.get("factura")] if g.get("factura") else []
-            )
-            receipts = [r for r in receipts if r]
+            receipts = g.get("facturas", [])
 
             img_elements = []
             for r_file in receipts:
                 local_path = ensure_receipt_cached_locally(r_file)
-                ext_file = Path(r_file).suffix.lower()
+                safe_name = Path(r_file.split("?")[0]).name
+                ext_file = Path(safe_name).suffix.lower()
 
                 if local_path and local_path.exists() and ext_file in [".png", ".jpg", ".jpeg", ".webp"]:
                     try:
@@ -547,7 +648,7 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
                             annex_images.append(
                                 (
                                     f"#{idx} — {g.get('producto', '')} (VES {p_ves:,.2f} / ${p_usdt:.2f} USDT)",
-                                    r_file,
+                                    safe_name,
                                     annex_io,
                                     w_orig * scale,
                                     h_orig * scale,
@@ -595,7 +696,6 @@ def generate_pdf_report(week_data: dict, rate: float) -> bytes:
         )
         story.append(expense_table)
 
-    # Append high-clarity Receipt Annex so receipts are easy to inspect in the PDF
     if annex_images:
         story.append(PageBreak())
         story.append(
@@ -638,7 +738,7 @@ class FundWeekRequest(BaseModel):
 
 class WeekSettingsRequest(BaseModel):
     presupuesto_base: float
-    remanente_anterior: float
+    saldo_disponible: float
 
 
 class ManualRateRequest(BaseModel):
@@ -655,30 +755,23 @@ def api_get_state(week: Optional[int] = Query(default=None)):
     real_week = get_current_real_week()
     selected_week_num = int(week) if week and int(week) >= 41 else real_week
 
-    data = load_data()
-    current_week = get_or_create_week(data, selected_week_num, rate)
+    current_week, global_available_usdt = build_week_state(selected_week_num, rate)
+    pending_list = supabase_gw.list_pending()
 
-    total_spent_ves = float(current_week.get("total_gastado", 0.0))
+    weekly_budget_usdt = round(float(current_week["presupuesto_base"]), 2)
+    total_spent_ves = round(float(current_week.get("total_gastado", 0.0)), 2)
     total_spent_usdt = round(total_spent_ves / rate, 2) if rate > 0 else 0.0
-    available_usdt = float(current_week.get("presupuesto_disponible", 0.0))
-    remaining_usdt = round(available_usdt - total_spent_usdt, 2)
-    remaining_ves = round(remaining_usdt * rate, 2)
 
-    all_week_nums = sorted(
-        list(
-            {
-                int(s.get("numero", real_week))
-                for s in data.get("semanas", [])
-                if int(s.get("numero", 0)) >= 41
-            }
-            | {real_week, selected_week_num}
-        )
-    )
+    # Disponible DE LA SEMANA = Presupuesto Semanal Aprobado - Total Gastado de esa semana
+    weekly_remaining_usdt = round(weekly_budget_usdt - total_spent_usdt, 2)
+    weekly_remaining_ves = round(weekly_remaining_usdt * rate, 2)
+
+    # Saldo Disponible GLOBAL = El dinero actualizado en caja hoy (no cambia al ver semanas pasadas)
+    global_available_ves = round(global_available_usdt * rate, 2)
 
     return {
         "real_current_week": real_week,
         "selected_week": selected_week_num,
-        "available_weeks": all_week_nums,
         "rate": rate,
         "rate_source": rate_info["source"],
         "rate_updated_at": rate_info["updated_at"],
@@ -687,15 +780,16 @@ def api_get_state(week: Optional[int] = Query(default=None)):
         "logo_base64": NG_LOGO_BASE64,
         "week": current_week,
         "metrics": {
-            "weekly_budget_usdt": round(float(current_week["presupuesto_base"]), 2),
-            "rollover_usdt": round(float(current_week["remanente_anterior"]), 2),
-            "available_budget_usdt": round(available_usdt, 2),
-            "total_spent_ves": round(total_spent_ves, 2),
+            "weekly_budget_usdt": weekly_budget_usdt,
+            "weekly_budget_ves": round(weekly_budget_usdt * rate, 2),
+            "total_spent_ves": total_spent_ves,
             "total_spent_usdt": total_spent_usdt,
-            "remaining_balance_usdt": remaining_usdt,
-            "remaining_balance_ves": remaining_ves,
+            "weekly_remaining_usdt": weekly_remaining_usdt,
+            "weekly_remaining_ves": weekly_remaining_ves,
+            "global_available_usdt": global_available_usdt,
+            "global_available_ves": global_available_ves,
         },
-        "pending_purchases": data.get("pending_purchases", []),
+        "pending_purchases": pending_list,
     }
 
 
@@ -744,91 +838,60 @@ def api_add_pending(payload: PendingItemRequest):
             status_code=400, detail="Por favor ingresa el nombre del insumo o necesidad."
         )
     prio = payload.priority if payload.priority in ["High", "Medium", "Low"] else "Medium"
-    data = load_data()
-    data.setdefault("pending_purchases", [])
-    new_item = {
-        "item": name,
-        "priority": prio,
-        "notes": payload.notes.strip(),
-        "date_added": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    data["pending_purchases"].append(new_item)
-    save_data(data)
-    return {"ok": True, "pending_purchases": data["pending_purchases"]}
+    supabase_gw.insert_pending(name, prio, payload.notes.strip())
+    return {"ok": True, "pending_purchases": supabase_gw.list_pending()}
 
 
-@app.delete("/api/pending/{idx}")
-def api_delete_pending(idx: int):
-    data = load_data()
-    pending = data.get("pending_purchases", [])
-    if idx < 0 or idx >= len(pending):
-        raise HTTPException(status_code=404, detail="Elemento no encontrado.")
-    removed = pending.pop(idx)
-    save_data(data)
-    return {
-        "ok": True,
-        "removed": removed,
-        "pending_purchases": pending,
-    }
+@app.delete("/api/pending/{item_id}")
+def api_delete_pending(item_id: int):
+    supabase_gw.delete_pending_by_id(item_id)
+    return {"ok": True, "pending_purchases": supabase_gw.list_pending()}
 
 
 @app.post("/api/week/{week_num}/fund")
 def api_fund_week(week_num: int, payload: FundWeekRequest):
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
-    current_week["budget_funded"] = bool(payload.funded)
-    normalize_week(current_week, rate)
-    save_data(data)
-    return {"ok": True, "week": current_week}
+    current_week, global_avail = build_week_state(week_num, rate)
+    was_funded = bool(current_week.get("budget_funded", False))
+    target_funded = bool(payload.funded)
+
+    if was_funded != target_funded:
+        base_b = float(current_week.get("presupuesto_base", 25.0))
+        delta = base_b if target_funded else -base_b
+        global_avail = supabase_gw.adjust_global_available_balance(delta)
+        current_week["budget_funded"] = target_funded
+        current_week["presupuesto_disponible"] = global_avail
+        supabase_gw.upsert_week_row(current_week)
+
+    return {"ok": True, "global_available_usdt": global_avail}
 
 
 @app.post("/api/week/{week_num}/settings")
 def api_update_week_settings(week_num: int, payload: WeekSettingsRequest):
-    if payload.presupuesto_base < 0 or payload.remanente_anterior < 0:
+    if payload.presupuesto_base < 0:
         raise HTTPException(
-            status_code=400, detail="Los montos no pueden ser negativos."
+            status_code=400, detail="El presupuesto semanal no puede ser negativo."
         )
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
-    current_week["presupuesto_base"] = round(float(payload.presupuesto_base), 2)
-    current_week["remanente_anterior"] = round(float(payload.remanente_anterior), 2)
-    normalize_week(current_week, rate)
-    save_data(data)
-    return {"ok": True, "week": current_week}
+    current_week, _ = build_week_state(week_num, rate)
 
-
-@app.post("/api/week/{week_num}/recalculate-rollover")
-def api_recalculate_rollover(week_num: int):
-    """Recalculates the rollover/savings of week_num based on the previous week's closing balance."""
-    rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
-
-    prev_weeks = sorted(
-        [
-            s
-            for s in data.get("semanas", [])
-            if 41 <= int(s.get("numero", 0)) < int(week_num)
-        ],
-        key=lambda x: int(x.get("numero", 0)),
+    # Update global available balance (applies across all weeks immediately)
+    supabase_gw.set_global_available_balance(
+        new_balance_usdt=payload.saldo_disponible,
+        default_budget=payload.presupuesto_base,
     )
-    if not prev_weeks:
-        return {"ok": True, "week": current_week, "message": "Primera semana registrada."}
 
-    prev = normalize_week(prev_weeks[-1], rate)
-    spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0.0
-    prev_base = float(prev["presupuesto_base"]) if prev.get("budget_funded") else 0.0
-    prev_available = prev_base + float(prev["remanente_anterior"])
-    current_week["remanente_anterior"] = round(prev_available - spent_usdt, 2)
-    normalize_week(current_week, rate)
-    save_data(data)
-    return {"ok": True, "week": current_week}
+    # Update selected week's base budget
+    current_week["presupuesto_base"] = round(float(payload.presupuesto_base), 2)
+    current_week["presupuesto_disponible"] = round(float(payload.saldo_disponible), 2)
+    current_week["remanente_anterior"] = round(float(payload.saldo_disponible), 2)
+    supabase_gw.upsert_week_row(current_week)
+
+    return {"ok": True}
 
 
 def _store_uploaded_receipts(week_num: int, files: List[UploadFile]) -> List[str]:
-    saved_names: List[str] = []
+    saved_urls: List[str] = []
     valid_files = [f for f in (files or []) if f and f.filename]
     for rf in valid_files[:3]:
         ext = Path(rf.filename).suffix.lower()
@@ -846,13 +909,9 @@ def _store_uploaded_receipts(week_num: int, files: List[UploadFile]) -> List[str
         except Exception:
             pass
 
-        try:
-            supabase_gw.upload_receipt(r_name, raw_bytes)
-        except Exception:
-            pass
-
-        saved_names.append(r_name)
-    return saved_names
+        public_url = supabase_gw.upload_receipt(r_name, raw_bytes)
+        saved_urls.append(public_url)
+    return saved_urls
 
 
 @app.post("/api/week/{week_num}/expenses")
@@ -860,7 +919,7 @@ def api_add_expense(
     week_num: int,
     producto: str = Form(...),
     precio: float = Form(...),
-    resolve_pending_index: Optional[int] = Form(default=None),
+    resolve_pending_id: Optional[int] = Form(default=None),
     receipts: List[UploadFile] = File(default=[]),
 ):
     clean_name = producto.strip()
@@ -874,38 +933,43 @@ def api_add_expense(
         )
 
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
+    current_week, _ = build_week_state(week_num, rate)
 
-    receipt_filenames = _store_uploaded_receipts(week_num, receipts)
+    receipt_urls = _store_uploaded_receipts(week_num, receipts)
+    factura_str = "|".join(receipt_urls) if receipt_urls else None
     p_usdt = round(float(precio) / rate, 2) if rate > 0 else 0.0
+    fecha_str = datetime.now().strftime("%Y-%m-%d")
 
-    expense = {
-        "producto": clean_name,
-        "precio": round(float(precio), 2),
-        "precio_usdt": p_usdt,
-        "factura": receipt_filenames[0] if receipt_filenames else None,
-        "facturas": receipt_filenames,
-        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    current_week["gastos"].append(expense)
-    normalize_week(current_week, rate)
+    inserted = supabase_gw.insert_expense(
+        week_num=week_num,
+        producto=clean_name,
+        precio=round(float(precio), 2),
+        precio_usdt=p_usdt,
+        factura_str=factura_str,
+        fecha_str=fecha_str,
+    )
 
-    # Optionally resolve a pending purchase item if selected
-    if (
-        resolve_pending_index is not None
-        and 0 <= resolve_pending_index < len(data.get("pending_purchases", []))
-    ):
-        data["pending_purchases"].pop(resolve_pending_index)
+    # Subtract expense from Global Saldo Disponible
+    new_global_avail = supabase_gw.adjust_global_available_balance(-p_usdt)
 
-    save_data(data)
-    return {"ok": True, "expense": expense, "week": current_week}
+    # Update week total_gastado in Supabase
+    current_week["total_gastado"] = round(float(current_week["total_gastado"]) + float(precio), 2)
+    current_week["presupuesto_disponible"] = new_global_avail
+    supabase_gw.upsert_week_row(current_week)
+
+    if resolve_pending_id is not None:
+        try:
+            supabase_gw.delete_pending_by_id(int(resolve_pending_id))
+        except Exception:
+            pass
+
+    return {"ok": True, "expense": inserted, "global_available_usdt": new_global_avail}
 
 
-@app.put("/api/week/{week_num}/expenses/{idx}")
+@app.put("/api/week/{week_num}/expenses/{expense_id}")
 def api_edit_expense(
     week_num: int,
-    idx: int,
+    expense_id: int,
     producto: str = Form(...),
     precio: float = Form(...),
     keep_existing_receipts: bool = Form(default=True),
@@ -922,18 +986,17 @@ def api_edit_expense(
         )
 
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
+    current_week, _ = build_week_state(week_num, rate)
 
-    gastos = current_week.get("gastos", [])
-    if idx < 0 or idx >= len(gastos):
-        raise HTTPException(status_code=404, detail="Gasto no encontrado.")
-
-    target = gastos[idx]
-    existing_files = target.get(
-        "facturas", [target.get("factura")] if target.get("factura") else []
+    target = next(
+        (g for g in current_week["gastos"] if int(g.get("id", -1)) == int(expense_id)),
+        None,
     )
-    existing_files = [f for f in existing_files if f]
+    if target is None:
+        raise HTTPException(status_code=404, detail="Gasto no encontrado en esta semana.")
+
+    old_usdt = float(target.get("precio_usdt", 0.0))
+    existing_files = target.get("facturas", [])
 
     new_uploaded = _store_uploaded_receipts(week_num, receipts)
     if new_uploaded:
@@ -943,36 +1006,52 @@ def api_edit_expense(
     else:
         final_receipts = []
 
-    p_usdt = round(float(precio) / rate, 2) if rate > 0 else 0.0
-    target["producto"] = clean_name
-    target["precio"] = round(float(precio), 2)
-    target["precio_usdt"] = p_usdt
-    target["factura"] = final_receipts[0] if final_receipts else None
-    target["facturas"] = final_receipts
+    factura_str = "|".join(final_receipts) if final_receipts else None
+    new_usdt = round(float(precio) / rate, 2) if rate > 0 else 0.0
 
-    normalize_week(current_week, rate)
-    save_data(data)
-    return {"ok": True, "expense": target, "week": current_week}
+    updated = supabase_gw.update_expense_by_id(
+        expense_id=expense_id,
+        producto=clean_name,
+        precio=round(float(precio), 2),
+        precio_usdt=new_usdt,
+        factura_str=factura_str,
+    )
+
+    # Adjust Global Saldo Disponible by the difference (refund old_usdt, subtract new_usdt)
+    delta_usdt = round(old_usdt - new_usdt, 2)
+    new_global_avail = supabase_gw.adjust_global_available_balance(delta_usdt)
+
+    # Refresh week total in Supabase
+    build_week_state(week_num, rate)
+    return {"ok": True, "expense": updated, "global_available_usdt": new_global_avail}
 
 
-@app.delete("/api/week/{week_num}/expenses/{idx}")
-def api_delete_expense(week_num: int, idx: int):
+@app.delete("/api/week/{week_num}/expenses/{expense_id}")
+def api_delete_expense(week_num: int, expense_id: int):
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
+    current_week, _ = build_week_state(week_num, rate)
 
-    gastos = current_week.get("gastos", [])
-    if idx < 0 or idx >= len(gastos):
+    target = next(
+        (g for g in current_week["gastos"] if int(g.get("id", -1)) == int(expense_id)),
+        None,
+    )
+    if target is None:
         raise HTTPException(status_code=404, detail="Gasto no encontrado.")
 
-    deleted = gastos.pop(idx)
-    normalize_week(current_week, rate)
-    save_data(data)
-    return {"ok": True, "deleted": deleted, "week": current_week}
+    old_usdt = float(target.get("precio_usdt", 0.0))
+    supabase_gw.delete_expense_by_id(expense_id)
+
+    # Refund the deleted expense back to Global Saldo Disponible
+    new_global_avail = supabase_gw.adjust_global_available_balance(old_usdt)
+
+    build_week_state(week_num, rate)
+    return {"ok": True, "deleted": target, "global_available_usdt": new_global_avail}
 
 
-@app.get("/api/receipts/{filename}")
+@app.get("/api/receipts/{filename:path}")
 def api_get_receipt(filename: str):
+    if filename.startswith("http"):
+        return RedirectResponse(filename)
     safe_name = Path(filename).name
     local_path = ensure_receipt_cached_locally(safe_name)
     if local_path and local_path.exists():
@@ -981,22 +1060,15 @@ def api_get_receipt(filename: str):
             local_path, media_type=mime_type or "application/octet-stream"
         )
 
-    try:
-        public_url = supabase_gw.get_public_url(safe_name)
-        if public_url:
-            return RedirectResponse(public_url)
-    except Exception:
-        pass
-
-    raise HTTPException(status_code=404, detail="Comprobante no encontrado.")
+    public_url = supabase_gw.get_public_url(safe_name)
+    return RedirectResponse(public_url)
 
 
 @app.get("/api/week/{week_num}/report.pdf")
 def api_download_pdf(week_num: int):
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
-    pdf_bytes = generate_pdf_report(current_week, rate)
+    current_week, global_avail = build_week_state(week_num, rate)
+    pdf_bytes = generate_pdf_report(current_week, global_avail, rate)
     filename = f"Nextglobal_Expense_Report_Week_{week_num}.pdf"
     return Response(
         content=pdf_bytes,
@@ -1008,17 +1080,15 @@ def api_download_pdf(week_num: int):
 @app.get("/api/week/{week_num}/report.csv")
 def api_download_csv(week_num: int):
     rate = float(get_active_rate()["rate"])
-    data = load_data()
-    current_week = get_or_create_week(data, week_num, rate)
+    current_week, _ = build_week_state(week_num, rate)
 
     lines = [
-        "\ufeff#,Item / Service,Price (VES),Price (USDT),Receipts Count,Date & Time"
+        "\ufeff#,Item / Service,Price (VES),Price (USDT),Receipts Count,Date"
     ]
     for idx, g in enumerate(current_week.get("gastos", []), 1):
         p_ves = float(g.get("precio", 0.0))
         p_usdt = float(g.get("precio_usdt", p_ves / rate if rate > 0 else 0.0))
-        recs = g.get("facturas", [g.get("factura")] if g.get("factura") else [])
-        recs = [r for r in recs if r]
+        recs = g.get("facturas", [])
         prod_escaped = str(g.get("producto", "")).replace('"', '""')
         lines.append(
             f'{idx},"{prod_escaped}",{p_ves:.2f},{p_usdt:.2f},{len(recs)},"{g.get("fecha", "")}"'

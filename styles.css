@@ -369,8 +369,8 @@ html, body {
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 16px;
   margin-bottom: 20px;
 }
 
@@ -378,10 +378,23 @@ html, body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  box-shadow: var(--shadow-card);
+}
+
+.kpi-split-inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.kpi-split-divider {
+  border-left: 1px solid var(--border-strong);
+  padding-left: 18px;
 }
 
 .kpi-label {
@@ -390,12 +403,12 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .kpi-primary {
   font-family: var(--font-mono);
-  font-size: 1.38rem;
+  font-size: 1.45rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text-primary);
@@ -417,7 +430,34 @@ html, body {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--text-secondary);
-  margin-top: 4px;
+  margin-top: 3px;
+}
+
+.kpi-weekly-rem-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+
+.kpi-weekly-rem-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.kpi-weekly-rem-val {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--status-positive);
+}
+
+.kpi-weekly-rem-val.negative {
+  color: var(--status-danger);
 }
 
 /* ==========================================================================
@@ -761,7 +801,7 @@ table.data-table tr:hover td {
   }
 
   .metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
   }
 }
 
@@ -775,16 +815,16 @@ table.data-table tr:hover td {
   }
 
   .metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .kpi-card {
-    padding: 12px;
+    padding: 14px;
   }
 
   .kpi-primary {
-    font-size: 1.12rem;
+    font-size: 1.18rem;
   }
 
   .price-Split-row {

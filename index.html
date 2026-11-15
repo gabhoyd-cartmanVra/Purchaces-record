@@ -180,30 +180,37 @@
         </button>
       </section>
 
-      <!-- 4 KPI Summary Cards -->
-      <section class="metrics-grid" aria-label="Resumen Financiero Semanal">
+      <!-- 2 Combined KPI Summary Cards -->
+      <section class="metrics-grid" aria-label="Resumen Financiero">
+        <!-- Recuadro 1: Presupuesto Semanal + Saldo Disponible dentro del mismo recuadro -->
         <div class="kpi-card">
-          <div class="kpi-label">Presupuesto Semanal</div>
-          <div class="kpi-primary" id="kpi-budget-usdt">$0.00 USDT</div>
-          <div class="kpi-secondary" id="kpi-budget-ves">VES 0.00</div>
+          <div class="kpi-split-inner">
+            <div>
+              <div class="kpi-label">Presupuesto Semanal</div>
+              <div class="kpi-primary" id="kpi-budget-usdt">$25.00 USDT</div>
+              <div class="kpi-secondary" id="kpi-budget-ves">VES 0.00</div>
+            </div>
+
+            <div class="kpi-split-divider">
+              <div class="kpi-label">Saldo Disponible (Actual)</div>
+              <div class="kpi-primary available" id="kpi-avail-usdt">$0.00 USDT</div>
+              <div class="kpi-secondary" id="kpi-avail-ves">VES 0.00</div>
+            </div>
+          </div>
         </div>
 
+        <!-- Recuadro 2: Total Gastado + abajo/pequeño el Total Disponible DE LA SEMANA -->
         <div class="kpi-card">
-          <div class="kpi-label">Remanente / Ahorro</div>
-          <div class="kpi-primary" id="kpi-rollover-usdt">$0.00 USDT</div>
-          <div class="kpi-secondary" id="kpi-rollover-ves">VES 0.00</div>
-        </div>
+          <div>
+            <div class="kpi-label">Total Gastado (<span class="week-label-inline">Semana</span>)</div>
+            <div class="kpi-primary spent" id="kpi-spent-usdt">$0.00 USDT</div>
+            <div class="kpi-secondary" id="kpi-spent-ves">VES 0.00</div>
+          </div>
 
-        <div class="kpi-card">
-          <div class="kpi-label">Total Gastado</div>
-          <div class="kpi-primary spent" id="kpi-spent-usdt">$0.00 USDT</div>
-          <div class="kpi-secondary" id="kpi-spent-ves">VES 0.00</div>
-        </div>
-
-        <div class="kpi-card">
-          <div class="kpi-label">Saldo Disponible</div>
-          <div class="kpi-primary available" id="kpi-avail-usdt">$0.00 USDT</div>
-          <div class="kpi-secondary" id="kpi-avail-ves">VES 0.00</div>
+          <div class="kpi-weekly-rem-footer">
+            <span class="kpi-weekly-rem-label" id="kpi-weekly-rem-label">Disponible de la semana (de $25.00):</span>
+            <span class="kpi-weekly-rem-val" id="kpi-weekly-rem-val">$25.00 USDT (VES 0.00)</span>
+          </div>
         </div>
       </section>
 
@@ -379,26 +386,26 @@
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
-          <!-- Budget & Rollover Settings -->
+          <!-- Budget & Global Available Balance Settings -->
           <div class="card" style="background: var(--bg-elevated); padding: 18px;">
-            <h3 class="card-title" style="margin-bottom: 12px;">💵 Presupuesto y Remanente (<span class="week-label-inline">Semana</span>)</h3>
+            <h3 class="card-title" style="margin-bottom: 12px;">💵 Presupuesto Semanal y Saldo Disponible</h3>
             <form id="form-week-settings">
               <div class="form-group">
-                <label class="form-label" for="setting-base-budget">Presupuesto Semanal Base ($ USDT)</label>
+                <label class="form-label" for="setting-base-budget">Presupuesto Semanal Aprobado ($ USDT)</label>
                 <input type="number" id="setting-base-budget" class="form-input mono" min="0" step="0.01" required />
               </div>
 
               <div class="form-group">
-                <label class="form-label" for="setting-rollover">Remanente / Ahorro Anterior ($ USDT)</label>
-                <input type="number" id="setting-rollover" class="form-input mono" min="-99999" step="0.01" required />
+                <label class="form-label" for="setting-global-balance">Saldo Disponible Actual en Caja ($ USDT)</label>
+                <input type="number" id="setting-global-balance" class="form-input mono" min="-99999" step="0.01" required />
+                <span style="display:block; font-size:0.74rem; color:var(--text-secondary); margin-top:4px;">
+                  Este saldo es global y se mantiene actualizado sin importar qué semana consultes.
+                </span>
               </div>
 
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 <button type="submit" class="btn btn-primary btn-block">
-                  💾 Guardar Presupuesto y Remanente
-                </button>
-                <button type="button" id="btn-recalc-rollover" class="btn btn-secondary btn-block btn-sm">
-                  🔄 Recalcular Remanente desde Semana Anterior
+                  💾 Guardar Presupuesto y Saldo Disponible
                 </button>
               </div>
             </form>

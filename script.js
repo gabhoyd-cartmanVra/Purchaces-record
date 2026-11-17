@@ -15,8 +15,8 @@ const DEFAULT_PASS = "Ng90071";
 const appState = {
   authenticated: localStorage.getItem("nxt_authenticated") === "true",
   backendMode: "detecting", // 'fastapi' or 'supabase-direct'
-  realCurrentWeek: 41,
-  selectedWeek: 41,
+  realCurrentWeek: null,
+  selectedWeek: null,
   rate: 100.0,
   rateSource: "Binance P2P",
   rateUpdatedAt: "",
@@ -1358,7 +1358,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Week Stepper & Sync
   document.getElementById("btn-prev-week").addEventListener("click", () => {
-    const next = Math.max(41, Number(appState.selectedWeek) - 1);
+    const next = Math.max(1, Number(appState.selectedWeek) - 1);
     loadState(next);
   });
   document.getElementById("btn-next-week").addEventListener("click", () => {
@@ -1366,7 +1366,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadState(next);
   });
   document.getElementById("input-week-num").addEventListener("change", (e) => {
-    const val = Math.max(41, Number(e.target.value) || appState.realCurrentWeek);
+    const val = Math.max(1, Number(e.target.value) || appState.realCurrentWeek);
     loadState(val);
   });
   document.getElementById("btn-sync-real-week").addEventListener("click", () => {

@@ -114,7 +114,7 @@ class SupabaseRelationalGateway:
 
     # --- WEEKS (TABLE semanas) ---
     def list_weeks(self) -> List[dict]:
-        url = f"{self.base_url}/rest/v1/semanas?numero=eq.{int(week_num)}&select=*"
+        url = f"{self.base_url}/rest/v1/semanas?numero=gte.1&select=*&order=numero.asc"
         res = requests.get(url, headers=self._headers(), timeout=6)
         if res.status_code == 200 and isinstance(res.json(), list):
             return res.json()
@@ -390,7 +390,7 @@ def get_active_rate(force_refresh: bool = False) -> dict:
 
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
-    return max(current_iso_week)
+    return int(current_iso_week)
 
 
 def parse_facturas_field(raw_factura: Optional[str]) -> List[str]:
@@ -779,7 +779,7 @@ def api_get_state(week: Optional[int] = Query(default=None)):
     rate_info = get_active_rate(force_refresh=False)
     rate = float(rate_info["rate"])
     real_week = get_current_real_week()
-    selected_week_num = int(week) if week and int(week) >= 41 else real_week
+    selected_week_num = int(week) if week and int(week) >= 1 else real_week
 
     current_week, global_available_usdt = build_week_state(selected_week_num, rate)
     pending_list = supabase_gw.list_pending()

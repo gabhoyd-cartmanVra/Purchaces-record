@@ -390,7 +390,7 @@ def get_active_rate(force_refresh: bool = False) -> dict:
 
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
-    return max(41, current_iso_week)
+    return max(current_iso_week)
 
 
 def parse_facturas_field(raw_factura: Optional[str]) -> List[str]:

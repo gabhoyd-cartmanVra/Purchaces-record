@@ -66,7 +66,7 @@ function getISOWeekNumber() {
   date.setUTCDate(date.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   const weekNo = Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
-  return Math.max(41, weekNo);
+  return weekNo;
 }
 
 function todayDateStr() {

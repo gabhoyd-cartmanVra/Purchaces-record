@@ -114,7 +114,7 @@ class SupabaseRelationalGateway:
 
     # --- WEEKS (TABLE semanas) ---
     def list_weeks(self) -> List[dict]:
-        url = f"{self.base_url}/rest/v1/semanas?numero=gte.41&select=*&order=numero.asc"
+        url = f"{self.base_url}/rest/v1/semanas?numero=eq.{int(week_num)}&select=*"
         res = requests.get(url, headers=self._headers(), timeout=6)
         if res.status_code == 200 and isinstance(res.json(), list):
             return res.json()

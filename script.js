@@ -22,6 +22,7 @@ const appState = {
   rateSource: "Binance P2P",
   rateUpdatedAt: "",
   logoBase64: "",
+  logoPdfBase64: "",
   weekData: null,
   metrics: null,
   pendingPurchases: [],
@@ -703,6 +704,7 @@ async function loadState(weekNum = null) {
         appState.rateSource = payload.rate_source;
         appState.rateUpdatedAt = payload.rate_updated_at;
         appState.logoBase64 = payload.logo_base64 || appState.logoBase64;
+        appState.logoPdfBase64 = payload.logo_pdf_base64 || appState.logoPdfBase64;
         appState.weekData = payload.week;
         appState.metrics = payload.metrics;
         appState.pendingPurchases = payload.pending_purchases || [];
@@ -720,6 +722,12 @@ async function loadState(weekNum = null) {
     try {
       const lRes = await fetch("logo.txt");
       if (lRes.ok) appState.logoBase64 = (await lRes.text()).trim();
+    } catch (_) {}
+  }
+  if (!appState.logoPdfBase64) {
+    try {
+      const lpRes = await fetch("logo_pdf.txt");
+      if (lpRes.ok) appState.logoPdfBase64 = (await lpRes.text()).trim();
     } catch (_) {}
   }
   if (!appState.rateUpdatedAt) {
@@ -823,7 +831,9 @@ async function loadState(weekNum = null) {
 // ==========================================================================
 function renderAll() {
   if (appState.logoBase64) {
-    const src = `data:image/png;base64,${appState.logoBase64}`;
+    const isJpeg = appState.logoBase64.startsWith("/9j/");
+    const mime = isJpeg ? "image/jpeg" : "image/png";
+    const src = `data:${mime};base64,${appState.logoBase64}`;
     const hLogo = document.getElementById("header-logo");
     const lLogo = document.getElementById("login-logo");
     if (hLogo) {
@@ -1376,18 +1386,19 @@ async function buildClientSidePdfDoc() {
   const isEn = appState.lang === "en";
 
   let y = 36;
-  if (appState.logoBase64) {
+  const pdfLogo = appState.logoPdfBase64 || appState.logoBase64;
+  if (pdfLogo) {
     try {
-      // 145 pt width x 48 pt height matches the 3:1 aspect ratio of the Nexxtglobal logo
+      // 165 pt width x 26 pt height matches the ~6.4:1 aspect ratio of the transparent NexxtGlobal logo
       doc.addImage(
-        `data:image/png;base64,${appState.logoBase64}`,
+        `data:image/png;base64,${pdfLogo}`,
         "PNG",
         36,
         y,
-        145,
-        48
+        165,
+        26
       );
-      y += 58;
+      y += 36;
     } catch (_) {
       y += 10;
     }

@@ -286,6 +286,14 @@ if LOGO_FILE.exists():
     except Exception:
         NG_LOGO_BASE64 = ""
 
+LOGO_PDF_FILE = BASE_DIR / "logo_pdf.txt"
+NG_LOGO_PDF_BASE64 = ""
+if LOGO_PDF_FILE.exists():
+    try:
+        NG_LOGO_PDF_BASE64 = LOGO_PDF_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        NG_LOGO_PDF_BASE64 = ""
+
 # ==============================================================================
 # FASTAPI APPLICATION INITIALIZATION
 # ==============================================================================
@@ -505,20 +513,21 @@ def generate_pdf_report(
 
     is_en = str(lang).lower().startswith("en")
 
-    if NG_LOGO_BASE64:
+    logo_to_use = NG_LOGO_PDF_BASE64 or NG_LOGO_BASE64
+    if logo_to_use:
         try:
-            raw_logo = base64.b64decode(NG_LOGO_BASE64)
+            raw_logo = base64.b64decode(logo_to_use)
             logo_io = io.BytesIO(raw_logo)
             pil_logo = PILImage.open(logo_io)
             w, h = pil_logo.size
-            aspect = h / float(w) if w > 0 else 0.334
-            target_w = 145
-            target_h = max(24, min(70, target_w * aspect))
+            aspect = h / float(w) if w > 0 else 0.156
+            target_w = 175
+            target_h = max(20, min(55, target_w * aspect))
             logo_io.seek(0)
             rl_logo = RLImage(logo_io, width=target_w, height=target_h)
             rl_logo.hAlign = "LEFT"
             story.append(rl_logo)
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 10))
         except Exception:
             pass
 
@@ -821,6 +830,7 @@ def api_get_state(week: Optional[int] = Query(default=None)):
         "rate_is_manual": rate_info["is_manual"],
         "supabase_connected": True,
         "logo_base64": NG_LOGO_BASE64,
+        "logo_pdf_base64": NG_LOGO_PDF_BASE64,
         "week": current_week,
         "metrics": {
             "weekly_budget_usdt": weekly_budget_usdt,
@@ -1175,6 +1185,13 @@ def serve_manifest():
 def serve_logo_txt():
     if LOGO_FILE.exists():
         return FileResponse(LOGO_FILE, media_type="text/plain")
+    return Response(content="", media_type="text/plain")
+
+
+@app.get("/logo_pdf.txt")
+def serve_logo_pdf_txt():
+    if LOGO_PDF_FILE.exists():
+        return FileResponse(LOGO_PDF_FILE, media_type="text/plain")
     return Response(content="", media_type="text/plain")
 
 if __name__ == "__main__":

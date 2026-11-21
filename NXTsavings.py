@@ -488,7 +488,9 @@ def ensure_receipt_cached_locally(file_ref: str) -> Optional[Path]:
 # ==============================================================================
 # PDF REPORT GENERATOR (REPORTLAB WITH EMBEDDED RECEIPTS & LOGO)
 # ==============================================================================
-def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: float) -> bytes:
+def generate_pdf_report(
+    week_data: dict, global_available_usdt: float, rate: float, lang: str = "es"
+) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -501,14 +503,16 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
     styles = getSampleStyleSheet()
     story = []
 
+    is_en = str(lang).lower().startswith("en")
+
     if NG_LOGO_BASE64:
         try:
             raw_logo = base64.b64decode(NG_LOGO_BASE64)
             logo_io = io.BytesIO(raw_logo)
             pil_logo = PILImage.open(logo_io)
             w, h = pil_logo.size
-            aspect = h / float(w) if w > 0 else 0.35
-            target_w = 130
+            aspect = h / float(w) if w > 0 else 0.334
+            target_w = 145
             target_h = max(24, min(70, target_w * aspect))
             logo_io.seek(0)
             rl_logo = RLImage(logo_io, width=target_w, height=target_h)
@@ -541,10 +545,15 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
         textColor=colors.HexColor("#1F2937"),
     )
 
-    story.append(Paragraph("NEXXTGLOBAL — WEEKLY EXPENSE REPORT", title_style))
+    doc_title = "NEXXTGLOBAL — WEEKLY EXPENSE REPORT"
+    gen_label = "Generated" if is_en else "Generado"
+    rate_label = "USDT Exchange Rate" if is_en else "Tasa de Cambio USDT"
+    week_label = "Week" if is_en else "Semana"
+
+    story.append(Paragraph(doc_title, title_style))
     story.append(
         Paragraph(
-            f"<b>Week {week_data['numero']}</b> &nbsp;|&nbsp; Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &nbsp;|&nbsp; USDT Exchange Rate: <b>VES {rate:.2f}</b>",
+            f"<b>{week_label} {week_data['numero']}</b> &nbsp;|&nbsp; {gen_label}: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &nbsp;|&nbsp; {rate_label}: <b>VES {rate:.2f}</b>",
             sub_style,
         )
     )
@@ -557,13 +566,13 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
     weekly_remaining_ves = round(weekly_remaining_usdt * rate, 2)
     global_available_ves = round(global_available_usdt * rate, 2)
 
+    hdr_budget = "Weekly Budget" if is_en else "Presupuesto Semanal"
+    hdr_spent = "Total Spent (Week)" if is_en else "Total Gastado (Semana)"
+    hdr_rem = "Available (Week)" if is_en else "Disponible de la Semana"
+    hdr_global = "Updated Total Savings" if is_en else "Ahorro Disponible Actualizado"
+
     summary_data = [
-        [
-            "Presupuesto Semanal",
-            "Total Gastado (Semana)",
-            "Disponible de la Semana",
-            "Ahorro Disponible Actualizado",
-        ],
+        [hdr_budget, hdr_spent, hdr_rem, hdr_global],
         [
             f"${weekly_budget_usdt:.2f} USDT\n(VES {weekly_budget_usdt * rate:,.2f})",
             f"${total_spent_usdt:.2f} USDT\n(VES {total_spent_ves:,.2f})",
@@ -595,7 +604,8 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
     story.append(summary_table)
     story.append(Spacer(1, 18))
 
-    story.append(Paragraph("<b>Desglose de Gastos (Expenses Breakdown)</b>", styles["Heading3"]))
+    breakdown_title = "Expenses Breakdown" if is_en else "Desglose de Gastos (Expenses Breakdown)"
+    story.append(Paragraph(f"<b>{breakdown_title}</b>", styles["Heading3"]))
     story.append(Spacer(1, 8))
 
     card_title_style = ParagraphStyle(
@@ -624,9 +634,8 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
     expenses = week_data.get("gastos", [])
 
     if not expenses:
-        story.append(
-            Paragraph("No hay gastos registrados en esta semana.", styles["Normal"])
-        )
+        no_exp_txt = "No expenses recorded for this week." if is_en else "No hay gastos registrados en esta semana."
+        story.append(Paragraph(no_exp_txt, styles["Normal"]))
     else:
         for idx, g in enumerate(expenses, 1):
             p_ves = float(g.get("precio", 0.0))
@@ -634,10 +643,17 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
                 g.get("precio_usdt", p_ves / rate if rate > 0 else 0.0)
             )
             fecha_txt = str(g.get("fecha", "—"))
-            prod_txt = str(g.get("producto", "Sin descripción"))
-            receipts = g.get("facturas", [])
+            prod_txt = str(g.get("producto", "Sin descripción" if not is_en else "No description"))
+            raw_receipts = g.get("facturas", [])
+            # Limit to maximum 2 receipts per expense as requested
+            receipts = raw_receipts[:2]
 
             # Left side content: Insumo/Servicio, Monto VES, Monto USDT, Fecha
+            lbl_item = "Item / Service" if is_en else "Insumo / Servicio"
+            lbl_ves = "Amount (VES):" if is_en else "Monto (VES):"
+            lbl_usdt = "Amount (USDT):" if is_en else "Monto (USDT):"
+            lbl_date = "Date:" if is_en else "Fecha:"
+
             left_flowables = [
                 Paragraph(
                     f"<font color='#6B7280'><b>#{idx}</b></font> &nbsp; <b>{prod_txt}</b>",
@@ -645,23 +661,23 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
                 ),
                 Spacer(1, 6),
                 Paragraph(
-                    f"<b>Monto (VES):</b> VES {p_ves:,.2f}",
+                    f"<b>{lbl_ves}</b> VES {p_ves:,.2f}",
                     card_meta_style,
                 ),
                 Paragraph(
-                    f"<b>Monto (USDT):</b> <font color='#0284C7'><b>${p_usdt:.2f} USDT</b></font>",
+                    f"<b>{lbl_usdt}</b> <font color='#0284C7'><b>${p_usdt:.2f} USDT</b></font>",
                     card_meta_style,
                 ),
                 Paragraph(
-                    f"<b>Fecha:</b> <font color='#6B7280'>{fecha_txt}</font>",
+                    f"<b>{lbl_date}</b> <font color='#6B7280'>{fecha_txt}</font>",
                     card_meta_style,
                 ),
             ]
 
-            # Right side content: Subtle receipt preview(s) inside the same box
+            # Right side content: Subtle receipt preview(s) inside the same box (up to 2 photos)
             right_flowables = []
-            max_box_w = 185.0 / max(len(receipts), 1)
-            max_box_h = 95.0
+            max_box_w = 98.0 if len(receipts) == 2 else 200.0
+            max_box_h = 92.0
 
             for r_file in receipts:
                 local_path = ensure_receipt_cached_locally(r_file)
@@ -689,24 +705,25 @@ def generate_pdf_report(week_data: dict, global_available_usdt: float, rate: flo
                             right_flowables.append(rl_img)
                     except Exception:
                         right_flowables.append(
-                            Paragraph("📎 Comprobante adjunto", card_empty_att_style)
+                            Paragraph("📎 Receipt attached" if is_en else "📎 Comprobante adjunto", card_empty_att_style)
                         )
                 elif ext_file == ".pdf":
+                    lbl_pdf = "📄 PDF Receipt" if is_en else "📄 Comprobante PDF"
                     right_flowables.append(
-                        Paragraph(f"📄 Comprobante PDF<br/>({safe_name})", card_empty_att_style)
+                        Paragraph(f"{lbl_pdf}<br/>({safe_name})", card_empty_att_style)
                     )
                 else:
                     right_flowables.append(
-                        Paragraph("📎 Adjunto", card_empty_att_style)
+                        Paragraph("📎 Attachment" if is_en else "📎 Adjunto", card_empty_att_style)
                     )
 
             if not right_flowables:
-                right_cell = Paragraph("Sin comprobante adjunto", card_empty_att_style)
+                right_cell = Paragraph("No receipt attached" if is_en else "Sin comprobante adjunto", card_empty_att_style)
             elif len(right_flowables) == 1:
                 right_cell = right_flowables[0]
             else:
                 # Arrange multiple receipts side-by-side neatly inside the right half
-                sub_tbl = Table([right_flowables])
+                sub_tbl = Table([right_flowables], colWidths=[100, 100])
                 sub_tbl.setStyle(
                     TableStyle(
                         [
@@ -919,7 +936,7 @@ def api_update_week_settings(week_num: int, payload: WeekSettingsRequest):
 def _store_uploaded_receipts(week_num: int, files: List[UploadFile]) -> List[str]:
     saved_urls: List[str] = []
     valid_files = [f for f in (files or []) if f and f.filename]
-    for rf in valid_files[:3]:
+    for rf in valid_files[:2]:
         ext = Path(rf.filename).suffix.lower()
         if ext not in [".png", ".jpg", ".jpeg", ".pdf", ".webp"]:
             ext = ".jpg"
@@ -1091,10 +1108,10 @@ def api_get_receipt(filename: str):
 
 
 @app.get("/api/week/{week_num}/report.pdf")
-def api_download_pdf(week_num: int):
+def api_download_pdf(week_num: int, lang: str = Query(default="es")):
     rate = float(get_active_rate()["rate"])
     current_week, global_avail = build_week_state(week_num, rate)
-    pdf_bytes = generate_pdf_report(current_week, global_avail, rate)
+    pdf_bytes = generate_pdf_report(current_week, global_avail, rate, lang=lang)
     filename = f"Nextglobal_Expense_Report_Week_{week_num}.pdf"
     return Response(
         content=pdf_bytes,

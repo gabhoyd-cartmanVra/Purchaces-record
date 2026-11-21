@@ -15,6 +15,7 @@ const DEFAULT_PASS = "Ng90071";
 const appState = {
   authenticated: localStorage.getItem("nxt_authenticated") === "true",
   backendMode: "detecting", // 'fastapi' or 'supabase-direct'
+  lang: localStorage.getItem("nxt_lang") || "es",
   realCurrentWeek: null,
   selectedWeek: null,
   rate: 100.0,
@@ -27,6 +28,285 @@ const appState = {
   recordCompressedFiles: [],
   editCompressedFiles: [],
 };
+
+// ==========================================================================
+// INTERNATIONALIZATION (i18n): EN & ES
+// ==========================================================================
+const TRANSLATIONS = {
+  es: {
+    brand_sub: "Nexxtglobal Weekly Budget Record",
+    nav_logout: "Salir",
+    rate_tooltip: "Tasa activa USDT / VES",
+    sync_btn_title: "Sincronizar con Binance P2P",
+    login_title: "🔒 Acceso al Sistema",
+    login_subtitle: "Portal de Caja Chica y Presupuesto Semanal Nexxtglobal",
+    login_user_lbl: "Usuario",
+    login_pass_lbl: "Contraseña",
+    login_pass_ph: "Ingresa la clave de acceso...",
+    login_remember: "Recordar sesión en este dispositivo (móvil / PC)",
+    login_btn: "Iniciar Sesión",
+    pub_pending_title: "🛒 Lista de Compras Pendientes",
+    pub_pending_sub: "Registra insumos o necesidades antes de entrar al sistema completo.",
+    pub_pending_ph: "Insumo o necesidad (ej. Café, Papel, Marcadores)...",
+    prio_high: "🔴 Alta",
+    prio_med: "🟡 Media",
+    prio_low: "🟢 Baja",
+    prio_high_full: "🔴 Prioridad Alta",
+    prio_med_full: "🟡 Prioridad Media",
+    prio_low_full: "🟢 Prioridad Baja",
+    btn_add: "Agregar",
+    btn_add_short: "Añadir",
+    week_ctrl_title: "📅 Control de Semana",
+    week_caption_prefix: "Semana calendario actual: Semana",
+    btn_sync_week: "Ir a Semana Actual",
+    sb_pending_title: "🛒 Compras Pendientes",
+    sb_pending_sub: "Toca ⚡ para cargar al formulario de gasto",
+    sb_pending_ph: "Nuevo insumo pendiente...",
+    funding_title_funded: (w, base) => `Semana ${w} fondeada (+$${formatNum(base)} USDT sumados al Saldo Disponible)`,
+    funding_sub_funded: "El presupuesto semanal aprobado ya fue transferido y sumado al saldo disponible en caja.",
+    btn_unfund: (base) => `➖ Revertir Fondeo (-$${formatNum(base)} USDT)`,
+    funding_title_unfunded: (w) => `Presupuesto de Semana ${w} pendiente por transferir`,
+    funding_sub_unfunded: "Haz clic en el botón cuando recibas la transferencia semanal para sumarla al saldo disponible.",
+    btn_fund_week: "Fondear Semana",
+    btn_fund_week_amt: (base) => `➕ Fondear Semana (+$${formatNum(base)} USDT)`,
+    kpi_weekly_budget: "Presupuesto Semanal",
+    kpi_global_avail: "Ahorro Disponible (Actual)",
+    kpi_total_spent: "Total Gastado",
+    kpi_rem_label: (b) => `Disponible de la semana (de $${formatNum(b)}):`,
+    kpi_rem_unfunded: "⏳ Sin fondear aún — no han llegado los fondos de esta semana",
+    kpi_rem_funded: "✅ Presupuesto semanal fondeado y activo",
+    tab_record: "📝 Registrar Gasto",
+    tab_summary: "📊 Historial y PDF",
+    tab_edit: "✏️ Editar Gasto",
+    tab_settings: "⚙️ Ajustes y Tasa",
+    nav_m_record: "Registrar",
+    nav_m_summary: "Historial/PDF",
+    nav_m_edit: "Editar",
+    nav_m_settings: "Ajustes",
+    record_title: "📝 Registrar Compra / Gasto",
+    record_sub: "Las fotos tomadas desde el celular se comprimen automáticamente antes de subir.",
+    resolving_pending_msg: "🛒 Completando compra pendiente:",
+    btn_cancel_link: "✕ Cancelar vínculo",
+    lbl_product_name: "Insumo, Producto o Servicio",
+    ph_product_name: "Ej. Botellones de agua, Café, Artículos de limpieza...",
+    lbl_price_ves: "Precio Pagado en Bolívares (VES)",
+    lbl_est_usdt: "Equivalente estimado en USDT (a tasa actual)",
+    lbl_receipts_dropzone: "Comprobantes de Pago / Facturas (Hasta 2 fotos PNG, JPG o PDF)",
+    dropzone_prompt: "Toca aquí para tomar foto de la factura o elegir archivos (máx. 2)",
+    dropzone_help: "Compresión inteligente integrada — se ajustan automáticamente de forma elegante en el PDF.",
+    btn_save_expense: "Guardar Gasto en Semana",
+    btn_saving_expense: "⏳ Guardando en Supabase y subiendo comprobantes...",
+    summary_title: "📊 Historial de Gastos y Reportes",
+    summary_sub: "Descarga o previsualiza el reporte PDF con las fotos de facturas incrustadas.",
+    btn_preview_pdf: "Vista Previa PDF",
+    btn_download_pdf: "Descargar PDF",
+    empty_summary: "No hay gastos registrados en esta semana todavía.",
+    tbl_col_item: "Insumo / Servicio",
+    tbl_col_ves: "Monto (VES)",
+    tbl_col_usdt: "Monto (USDT)",
+    tbl_col_receipts: "Comprobantes",
+    tbl_col_date: "Fecha",
+    tbl_col_actions: "Acciones",
+    no_receipt: "Sin adjunto",
+    view_receipt_chip: (idx) => `Ver #${idx}`,
+    edit_title: "✏️ Editar o Eliminar Gasto",
+    edit_sub: "Corrige el nombre, el monto en VES o reemplaza los comprobantes adjuntos.",
+    empty_edit: "No hay gastos registrados en esta semana para editar.",
+    lbl_select_edit: "Selecciona el gasto a modificar",
+    lbl_edit_price_ves: "Precio en Bolívares (VES)",
+    lbl_new_est_usdt: "Nuevo equivalente en USDT",
+    lbl_curr_receipts: "Comprobantes Actuales",
+    no_curr_receipts: "Este gasto no tiene comprobantes adjuntos actualmente.",
+    view_curr_chip: (idx, name) => `📎 Ver comprobante #${idx} (${name})`,
+    edit_dropzone_prompt: "📎 Reemplazar comprobantes (opcional — hasta 2 fotos)",
+    edit_dropzone_help: "Si no subes archivos nuevos, se conservarán los comprobantes actuales.",
+    btn_save_changes: "Guardar Cambios",
+    btn_updating_expense: "⏳ Actualizando en Supabase...",
+    btn_delete_expense: "Eliminar Gasto",
+    settings_title: "⚙️ Ajustes Financieros y Tasa USDT",
+    settings_sub: "Configura el presupuesto aprobado por gerencia, el remanente acumulado y la tasa USDT/VES.",
+    settings_budget_title: "💵 Presupuesto Semanal y Saldo Disponible",
+    lbl_base_budget: "Presupuesto Semanal Aprobado ($ USDT)",
+    lbl_global_bal: "Saldo Disponible Actual en Caja ($ USDT)",
+    help_global_bal: "Este saldo es global y se mantiene actualizado sin importar qué semana consultes.",
+    btn_save_settings: "Guardar Presupuesto y Saldo Disponible",
+    settings_rate_title: "🪙 Tasa de Cambio USDT / VES",
+    lbl_manual_rate: "Tasa Manual USDT (VES)",
+    btn_apply_rate: "Aplicar Tasa Manual",
+    btn_sync_binance: "Sincronizar en Vivo con Binance P2P",
+    rate_last_sync_prefix: "Última sincronización:",
+    btn_close_modal: "✕ Cerrar",
+    pdf_modal_heading: "Vista Previa del Reporte PDF",
+    toast_login_ok: "✅ Bienvenido al portal Nextglobal.",
+    toast_logout: "Sesión cerrada.",
+    toast_auth_err: "Contraseña incorrecta. Intenta de nuevo.",
+    toast_max_photos: "Máximo 2 comprobantes por gasto. Se tomarán los primeros 2.",
+    toast_optimizing: "Comprimiendo y optimizando comprobantes...",
+    toast_pdf_generating: "📄 Generando reporte PDF...",
+    toast_sync_week: (w) => `Sincronizado con Semana ${w}`,
+    toast_rate_synced: (r) => `✅ Tasa actualizada: VES ${formatNum(r)}`,
+    toast_rate_manual: (r) => `✅ Tasa establecida en VES ${formatNum(r)}`,
+    toast_item_saved: (name, p) => `✅ Guardado "${name}" en Supabase (VES ${formatNum(p)})`,
+    toast_item_updated: (name) => `✅ Gasto "${name}" actualizado en Supabase.`,
+    toast_settings_saved: "✅ Presupuesto Semanal y Saldo Disponible Global actualizados.",
+    confirm_delete: (name, p) => `¿Seguro que deseas eliminar el gasto "${name}" (VES ${formatNum(p)})? El monto se reintegrará al Saldo Disponible.`
+  },
+  en: {
+    brand_sub: "Nexxtglobal Weekly Budget Record",
+    nav_logout: "Log Out",
+    rate_tooltip: "Active USDT / VES Rate",
+    sync_btn_title: "Sync with Binance P2P",
+    login_title: "🔒 System Access",
+    login_subtitle: "Nexxtglobal Petty Cash & Weekly Budget Portal",
+    login_user_lbl: "Username",
+    login_pass_lbl: "Password",
+    login_pass_ph: "Enter access password...",
+    login_remember: "Remember session on this device (mobile / PC)",
+    login_btn: "Log In",
+    pub_pending_title: "🛒 Pending Purchases List",
+    pub_pending_sub: "Log items or needs before entering the full system.",
+    pub_pending_ph: "Item or supply needed (e.g. Coffee, Paper, Markers)...",
+    prio_high: "🔴 High",
+    prio_med: "🟡 Medium",
+    prio_low: "🟢 Low",
+    prio_high_full: "🔴 High Priority",
+    prio_med_full: "🟡 Medium Priority",
+    prio_low_full: "🟢 Low Priority",
+    btn_add: "Add",
+    btn_add_short: "Add",
+    week_ctrl_title: "📅 Week Control",
+    week_caption_prefix: "Current Calendar Week: Week",
+    btn_sync_week: "Go to Current Week",
+    sb_pending_title: "🛒 Pending Purchases",
+    sb_pending_sub: "Tap ⚡ to load into expense form",
+    sb_pending_ph: "New pending item...",
+    funding_title_funded: (w, base) => `Week ${w} funded (+$${formatNum(base)} USDT added to Available Savings)`,
+    funding_sub_funded: "The approved weekly budget has been transferred and credited to available cash.",
+    btn_unfund: (base) => `➖ Revert Funding (-$${formatNum(base)} USDT)`,
+    funding_title_unfunded: (w) => `Week ${w} budget pending transfer`,
+    funding_sub_unfunded: "Click this button once weekly funds arrive to add them to your available balance.",
+    btn_fund_week: "Fund Week",
+    btn_fund_week_amt: (base) => `➕ Fund Week (+$${formatNum(base)} USDT)`,
+    kpi_weekly_budget: "Weekly Budget",
+    kpi_global_avail: "Available Savings (Current)",
+    kpi_total_spent: "Total Spent",
+    kpi_rem_label: (b) => `Weekly Available (from $${formatNum(b)}):`,
+    kpi_rem_unfunded: "⏳ Unfunded yet — weekly funds have not arrived",
+    kpi_rem_funded: "✅ Weekly budget funded and active",
+    tab_record: "📝 Record Expense",
+    tab_summary: "📊 History & PDF",
+    tab_edit: "✏️ Edit Expense",
+    tab_settings: "⚙️ Settings & Rate",
+    nav_m_record: "Record",
+    nav_m_summary: "History/PDF",
+    nav_m_edit: "Edit",
+    nav_m_settings: "Settings",
+    record_title: "📝 Record Expense / Purchase",
+    record_sub: "Photos taken from your smartphone are automatically compressed before upload.",
+    resolving_pending_msg: "🛒 Resolving pending item:",
+    btn_cancel_link: "✕ Cancel link",
+    lbl_product_name: "Item, Product or Service",
+    ph_product_name: "E.g. Bottled water, Coffee, Cleaning supplies...",
+    lbl_price_ves: "Price Paid in Bolivars (VES)",
+    lbl_est_usdt: "Estimated USDT Equivalent (at current rate)",
+    lbl_receipts_dropzone: "Payment Receipts / Invoices (Up to 2 photos PNG, JPG or PDF)",
+    dropzone_prompt: "Tap here to take photo or choose files (max 2)",
+    dropzone_help: "Built-in smart compression — photos fit automatically and elegantly in the PDF.",
+    btn_save_expense: "Save Expense in Week",
+    btn_saving_expense: "⏳ Saving to Supabase & uploading receipts...",
+    summary_title: "📊 Expense History & Reports",
+    summary_sub: "Download or preview the PDF report with embedded invoice photos.",
+    btn_preview_pdf: "PDF Preview",
+    btn_download_pdf: "Download PDF",
+    empty_summary: "No expenses recorded for this week yet.",
+    tbl_col_item: "Item / Service",
+    tbl_col_ves: "Amount (VES)",
+    tbl_col_usdt: "Amount (USDT)",
+    tbl_col_receipts: "Receipts",
+    tbl_col_date: "Date",
+    tbl_col_actions: "Actions",
+    no_receipt: "No attachment",
+    view_receipt_chip: (idx) => `View #${idx}`,
+    edit_title: "✏️ Edit or Delete Expense",
+    edit_sub: "Fix item name, price in VES or replace attached receipts.",
+    empty_edit: "No expenses recorded for this week to edit.",
+    lbl_select_edit: "Select expense to edit",
+    lbl_edit_price_ves: "Price in Bolivars (VES)",
+    lbl_new_est_usdt: "New USDT equivalent",
+    lbl_curr_receipts: "Current Receipts",
+    no_curr_receipts: "This expense currently has no receipts attached.",
+    view_curr_chip: (idx, name) => `📎 View receipt #${idx} (${name})`,
+    edit_dropzone_prompt: "📎 Replace receipts (optional — up to 2 photos)",
+    edit_dropzone_help: "If you don't upload new files, existing receipts will be preserved.",
+    btn_save_changes: "Save Changes",
+    btn_updating_expense: "⏳ Updating in Supabase...",
+    btn_delete_expense: "Delete Expense",
+    settings_title: "⚙️ Financial Settings & USDT Rate",
+    settings_sub: "Configure the approved budget from management, cumulative savings, and USDT/VES exchange rate.",
+    settings_budget_title: "💵 Weekly Budget & Available Savings",
+    lbl_base_budget: "Approved Weekly Budget ($ USDT)",
+    lbl_global_bal: "Current Available Savings in Cash ($ USDT)",
+    help_global_bal: "This balance is global and stays updated regardless of which week you view.",
+    btn_save_settings: "Save Budget & Available Balance",
+    settings_rate_title: "🪙 USDT / VES Exchange Rate",
+    lbl_manual_rate: "Manual USDT Rate (VES)",
+    btn_apply_rate: "Apply Manual Rate",
+    btn_sync_binance: "Sync Live with Binance P2P",
+    rate_last_sync_prefix: "Last sync:",
+    btn_close_modal: "✕ Close",
+    pdf_modal_heading: "PDF Report Preview",
+    toast_login_ok: "✅ Welcome to the Nextglobal portal.",
+    toast_logout: "Session closed.",
+    toast_auth_err: "Incorrect password. Please try again.",
+    toast_max_photos: "Maximum 2 receipts per expense. The first 2 will be processed.",
+    toast_optimizing: "Compressing and optimizing receipts...",
+    toast_pdf_generating: "📄 Generating PDF report...",
+    toast_sync_week: (w) => `Synced to Week ${w}`,
+    toast_rate_synced: (r) => `✅ Rate updated: VES ${formatNum(r)}`,
+    toast_rate_manual: (r) => `✅ Rate set to VES ${formatNum(r)}`,
+    toast_item_saved: (name, p) => `✅ Saved "${name}" to Supabase (VES ${formatNum(p)})`,
+    toast_item_updated: (name) => `✅ Expense "${name}" updated in Supabase.`,
+    toast_settings_saved: "✅ Weekly Budget and Global Available Savings updated.",
+    confirm_delete: (name, p) => `Are you sure you want to delete expense "${name}" (VES ${formatNum(p)})? The amount will be refunded to Available Balance.`
+  }
+};
+
+function t(key, ...args) {
+  const dict = TRANSLATIONS[appState.lang] || TRANSLATIONS.es;
+  const val = dict[key] !== undefined ? dict[key] : (TRANSLATIONS.es[key] || key);
+  if (typeof val === "function") {
+    return val(...args);
+  }
+  return val;
+}
+
+function applyTranslations() {
+  document.documentElement.lang = appState.lang;
+  const btnEs = document.getElementById("btn-lang-es");
+  const btnEn = document.getElementById("btn-lang-en");
+  if (btnEs) btnEs.classList.toggle("active", appState.lang === "es");
+  if (btnEn) btnEn.classList.toggle("active", appState.lang === "en");
+
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const k = el.getAttribute("data-i18n");
+    el.textContent = t(k);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const k = el.getAttribute("data-i18n-placeholder");
+    el.setAttribute("placeholder", t(k));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const k = el.getAttribute("data-i18n-title");
+    el.setAttribute("title", t(k));
+  });
+}
+
+function setLanguage(lang) {
+  appState.lang = lang === "en" ? "en" : "es";
+  localStorage.setItem("nxt_lang", appState.lang);
+  applyTranslations();
+  renderAll();
+}
 
 // ==========================================================================
 // UTILITY HELPERS & AUTOMATIC IMAGE COMPRESSION
@@ -565,7 +845,7 @@ function renderAll() {
   const lastUpdEl = document.getElementById("rate-last-updated");
   if (lastUpdEl) {
     lastUpdEl.textContent = appState.rateUpdatedAt
-      ? `Última sincronización: ${appState.rateUpdatedAt} (${appState.rateSource})`
+      ? `${t("rate_last_sync_prefix")} ${appState.rateUpdatedAt} (${appState.rateSource})`
       : "";
   }
 
@@ -589,14 +869,15 @@ function renderAll() {
   mobileNav.classList.remove("hidden");
 
   document.getElementById("real-week-caption").textContent =
-    `Semana calendario actual: Semana ${appState.realCurrentWeek}`;
+    `${t("week_caption_prefix")} ${appState.realCurrentWeek}`;
   const weekInput = document.getElementById("input-week-num");
   if (document.activeElement !== weekInput) {
     weekInput.value = appState.selectedWeek;
   }
 
+  const wkWord = appState.lang === "en" ? "Week" : "Semana";
   document.querySelectorAll(".week-label-inline").forEach((el) => {
-    el.textContent = `Semana ${appState.selectedWeek}`;
+    el.textContent = `${wkWord} ${appState.selectedWeek}`;
   });
 
   renderPendingLists();
@@ -611,19 +892,20 @@ function renderPendingLists() {
   const items = appState.pendingPurchases || [];
   const pubCount = document.getElementById("pub-pending-count");
   const sbCount = document.getElementById("sb-pending-count");
-  if (pubCount) pubCount.textContent = `${items.length} pendiente(s)`;
+  const pWord = appState.lang === "en" ? "pending" : "pendiente(s)";
+  if (pubCount) pubCount.textContent = `${items.length} ${pWord}`;
   if (sbCount) sbCount.textContent = String(items.length);
 
   const buildBadge = (prio) => {
-    if (prio === "High") return `<span class="badge badge-high">🔴 Alta</span>`;
-    if (prio === "Low") return `<span class="badge badge-low">🟢 Baja</span>`;
-    return `<span class="badge badge-medium">🟡 Media</span>`;
+    if (prio === "High") return `<span class="badge badge-high">${t("prio_high")}</span>`;
+    if (prio === "Low") return `<span class="badge badge-low">${t("prio_low")}</span>`;
+    return `<span class="badge badge-medium">${t("prio_med")}</span>`;
   };
 
   const pubContainer = document.getElementById("pub-pending-list");
   if (pubContainer) {
     if (items.length === 0) {
-      pubContainer.innerHTML = `<div class="card-subtitle" style="padding:12px 0;">No hay insumos pendientes registrados.</div>`;
+      pubContainer.innerHTML = `<div class="card-subtitle" style="padding:12px 0;">${appState.lang === "en" ? "No pending items logged." : "No hay insumos pendientes registrados."}</div>`;
     } else {
       pubContainer.innerHTML = items
         .map(
@@ -635,7 +917,7 @@ function renderPendingLists() {
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             ${buildBadge(it.priority)}
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${it.id})" title="Eliminar pendiente">🗑️</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${it.id})" title="${t("btn_delete_expense")}">🗑️</button>
           </div>
         </div>
       `
@@ -647,7 +929,7 @@ function renderPendingLists() {
   const sbContainer = document.getElementById("sb-pending-list");
   if (sbContainer) {
     if (items.length === 0) {
-      sbContainer.innerHTML = `<div class="card-subtitle">Sin insumos pendientes.</div>`;
+      sbContainer.innerHTML = `<div class="card-subtitle">${appState.lang === "en" ? "No pending items." : "Sin insumos pendientes."}</div>`;
     } else {
       sbContainer.innerHTML = items
         .map(
@@ -658,8 +940,8 @@ function renderPendingLists() {
             <div style="margin-top: 2px;">${buildBadge(it.priority)}</div>
           </div>
           <div style="display:flex; align-items:center; gap:5px;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="prefillExpenseFromPending(${it.id})" title="Cargar en Registrar Gasto">⚡</button>
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${it.id})" title="Quitar de pendientes">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="prefillExpenseFromPending(${it.id})" title="⚡">⚡</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeletePending(${it.id})" title="🗑️">🗑️</button>
           </div>
         </div>
       `
@@ -683,19 +965,17 @@ function renderFundingAndMetrics() {
   if (w.budget_funded) {
     banner.className = "funding-banner is-funded";
     icon.textContent = "✅";
-    title.textContent = `Semana ${w.numero} fondeada (+$${formatNum(w.presupuesto_base)} USDT sumados al Saldo Disponible)`;
-    subtitle.textContent =
-      "El presupuesto semanal aprobado ya fue transferido y sumado al saldo disponible en caja.";
+    title.textContent = t("funding_title_funded", w.numero, w.presupuesto_base);
+    subtitle.textContent = t("funding_sub_funded");
     btn.className = "btn btn-secondary";
-    btn.textContent = `➖ Revertir Fondeo (-$${formatNum(w.presupuesto_base)} USDT)`;
+    btn.textContent = t("btn_unfund", w.presupuesto_base);
   } else {
     banner.className = "funding-banner is-unfunded";
     icon.textContent = "ℹ️";
-    title.textContent = `Presupuesto de Semana ${w.numero} pendiente por transferir`;
-    subtitle.textContent =
-      "Haz clic en el botón cuando recibas la transferencia semanal para sumarla al saldo disponible.";
+    title.textContent = t("funding_title_unfunded", w.numero);
+    subtitle.textContent = t("funding_sub_unfunded");
     btn.className = "btn btn-primary";
-    btn.textContent = `➕ Fondear Semana (+$${formatNum(w.presupuesto_base)} USDT)`;
+    btn.textContent = t("btn_fund_week_amt", w.presupuesto_base);
   }
 
   // Recuadro 1: Presupuesto Semanal + Saldo Disponible Global (dentro del mismo recuadro)
@@ -715,16 +995,16 @@ function renderFundingAndMetrics() {
   const remVal = document.getElementById("kpi-weekly-rem-val");
   const remNote = document.getElementById("kpi-weekly-rem-note");
   const isFunded = Boolean(w.budget_funded);
-  remLabel.textContent = `Disponible de la semana (de $${formatNum(m.weekly_budget_usdt)}):`;
+  remLabel.textContent = t("kpi_rem_label", m.weekly_budget_usdt);
   remVal.textContent = `$${formatNum(m.weekly_remaining_usdt)} USDT (VES ${formatNum(m.weekly_remaining_ves)})`;
   remVal.classList.toggle("unfunded", !isFunded);
   remVal.classList.toggle("negative", isFunded && m.weekly_remaining_usdt < 0);
   if (remNote) {
     if (!isFunded) {
-      remNote.textContent = "⏳ Sin fondear aún — no han llegado los fondos de esta semana";
+      remNote.textContent = t("kpi_rem_unfunded");
       remNote.classList.remove("funded");
     } else {
-      remNote.textContent = "✅ Presupuesto semanal fondeado y activo";
+      remNote.textContent = t("kpi_rem_funded");
       remNote.classList.add("funded");
     }
   }
@@ -769,12 +1049,12 @@ function renderSummaryTable() {
 
       const receiptsHtml =
         receipts.length === 0
-          ? `<span style="color:var(--text-muted); font-size:0.78rem;">Sin adjunto</span>`
+          ? `<span style="color:var(--text-muted); font-size:0.78rem;">${t("no_receipt")}</span>`
           : receipts
               .map((rFile, rIdx) => {
                 const ext = (rFile.split(".").pop() || "").toLowerCase();
                 const icon = ext === "pdf" ? "📄" : "🖼️";
-                return `<button type="button" class="receipt-chip" onclick="openReceiptModal('${escapeAttr(rFile)}', '${escapeAttr(g.producto)}')">${icon} Ver #${rIdx + 1}</button>`;
+                return `<button type="button" class="receipt-chip" onclick="openReceiptModal('${escapeAttr(rFile)}', '${escapeAttr(g.producto)}')">${icon} ${t("view_receipt_chip", rIdx + 1)}</button>`;
               })
               .join("");
 
@@ -788,8 +1068,8 @@ function renderSummaryTable() {
         <td style="font-size: 0.78rem; color: var(--text-secondary);">${escapeHtml(g.fecha || "")}</td>
         <td>
           <div style="display:flex; gap:6px;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="jumpToEditExpense(${g.id})" title="Editar este gasto">✏️</button>
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeleteExpense(${g.id})" title="Eliminar este gasto">🗑️</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="jumpToEditExpense(${g.id})" title="${t("tab_edit")}">✏️</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleDeleteExpense(${g.id})" title="${t("btn_delete_expense")}">🗑️</button>
           </div>
         </td>
       </tr>
@@ -846,12 +1126,12 @@ function populateEditFormForId(expenseId) {
 
   const currContainer = document.getElementById("edit-current-receipts");
   if (receipts.length === 0) {
-    currContainer.innerHTML = `<span class="card-subtitle">Este gasto no tiene comprobantes adjuntos actualmente.</span>`;
+    currContainer.innerHTML = `<span class="card-subtitle">${t("no_curr_receipts")}</span>`;
   } else {
     currContainer.innerHTML = receipts
       .map((rFile, i) => {
         const shortName = rFile.split("/").pop();
-        return `<button type="button" class="receipt-chip" onclick="openReceiptModal('${escapeAttr(rFile)}', '${escapeAttr(target.producto)}')">📎 Ver comprobante actual #${i + 1} (${escapeHtml(shortName)})</button>`;
+        return `<button type="button" class="receipt-chip" onclick="openReceiptModal('${escapeAttr(rFile)}', '${escapeAttr(target.producto)}')">${t("view_curr_chip", i + 1, escapeHtml(shortName))}</button>`;
       })
       .join("");
   }
@@ -981,7 +1261,7 @@ window.handleDeleteExpense = async function (expenseId) {
   if (!target) return;
   if (
     !confirm(
-      `¿Seguro que deseas eliminar el gasto "${target.producto}" (VES ${formatNum(target.precio)})? El monto se reintegrará al Saldo Disponible.`
+      t("confirm_delete", target.producto, target.precio)
     )
   ) {
     return;
@@ -999,7 +1279,11 @@ window.handleDeleteExpense = async function (expenseId) {
       await sbDeleteExpense(expenseId);
       await sbAdjustGlobalBalance(oldUsdt);
     }
-    showToast(`🗑️ Gasto "${target.producto}" eliminado y saldo reintegrado.`);
+    showToast(
+      appState.lang === "en"
+        ? `🗑️ Expense "${target.producto}" deleted and balance refunded.`
+        : `🗑️ Gasto "${target.producto}" eliminado y saldo reintegrado.`
+    );
     await loadState(appState.selectedWeek);
   } catch (err) {
     showToast(err.message || "Error al eliminar gasto.", "error");
@@ -1022,12 +1306,12 @@ async function handleFileSelection(inputEl, previewContainerId, targetKey) {
   const rawFiles = Array.from(inputEl.files || []);
   if (rawFiles.length === 0) return;
 
-  if (rawFiles.length > 3) {
-    showToast("Máximo 3 comprobantes por gasto. Se tomarán los primeros 3.", "error");
+  if (rawFiles.length > 2) {
+    showToast(t("toast_max_photos"), "error");
   }
-  const slice = rawFiles.slice(0, 3);
+  const slice = rawFiles.slice(0, 2);
   const container = document.getElementById(previewContainerId);
-  container.innerHTML = `<div class="card-subtitle">Comprimiendo y optimizando comprobantes...</div>`;
+  container.innerHTML = `<div class="card-subtitle">${t("toast_optimizing")}</div>`;
 
   const processed = [];
   for (const f of slice) {
@@ -1079,57 +1363,63 @@ async function fetchImageAsDataUrl(url) {
   }
 }
 
-async function generateClientSidePdf() {
+async function buildClientSidePdfDoc() {
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    showToast("Generador PDF cargando, intenta en un segundo.", "error");
-    return;
+    showToast(t("toast_pdf_generating"), "error");
+    return null;
   }
-  showToast("📄 Generando reporte PDF con comprobantes...");
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const w = appState.weekData;
   const m = appState.metrics;
   const r = appState.rate;
+  const isEn = appState.lang === "en";
 
   let y = 36;
   if (appState.logoBase64) {
     try {
+      // 145 pt width x 48 pt height matches the 3:1 aspect ratio of the Nexxtglobal logo
       doc.addImage(
         `data:image/png;base64,${appState.logoBase64}`,
         "PNG",
         36,
         y,
-        115,
-        36
+        145,
+        48
       );
-      y += 46;
-    } catch (_) {}
+      y += 58;
+    } catch (_) {
+      y += 10;
+    }
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
+  doc.setTextColor(17, 24, 39);
   doc.text("NEXXTGLOBAL — WEEKLY EXPENSE REPORT", 36, y);
   y += 16;
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);
+  doc.setTextColor(75, 85, 99);
+  const genLbl = isEn ? "Generated" : "Generado";
+  const rateLbl = isEn ? "USDT Exchange Rate" : "Tasa de Cambio USDT";
+  const wkLbl = isEn ? "Week" : "Semana";
   doc.text(
-    `Week ${w.numero}   |   Generated: ${nowFormatted()}   |   USDT Exchange Rate: VES ${formatNum(r)}`,
+    `${wkLbl} ${w.numero}   |   ${genLbl}: ${nowFormatted()}   |   ${rateLbl}: VES ${formatNum(r)}`,
     36,
     y
   );
   y += 14;
 
+  const hdrBudget = isEn ? "Weekly Budget" : "Presupuesto Semanal";
+  const hdrSpent = isEn ? "Total Spent (Week)" : "Total Gastado (Semana)";
+  const hdrRem = isEn ? "Available (Week)" : "Disponible de la Semana";
+  const hdrGlobal = isEn ? "Updated Total Savings" : "Ahorro Disponible Actualizado";
+
   doc.autoTable({
     startY: y,
-    head: [
-      [
-        "Presupuesto Semanal",
-        "Total Gastado (Semana)",
-        "Disponible de la Semana",
-        "Ahorro Disponible Actualizado",
-      ],
-    ],
+    head: [[hdrBudget, hdrSpent, hdrRem, hdrGlobal]],
     body: [
       [
         `$${formatNum(m.weekly_budget_usdt)} USDT\n(VES ${formatNum(m.weekly_budget_ves)})`,
@@ -1147,7 +1437,8 @@ async function generateClientSidePdf() {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(17, 24, 39);
-  doc.text("Expenses Breakdown (Desglose de Gastos)", 36, y);
+  const bTitle = isEn ? "Expenses Breakdown" : "Desglose de Gastos (Expenses Breakdown)";
+  doc.text(bTitle, 36, y);
   y += 12;
 
   const gastos = w.gastos || [];
@@ -1158,21 +1449,23 @@ async function generateClientSidePdf() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.setTextColor(107, 114, 128);
-    doc.text("Sin gastos registrados en esta semana.", 50, y + 25);
+    const noExpMsg = isEn ? "No expenses recorded for this week." : "Sin gastos registrados en esta semana.";
+    doc.text(noExpMsg, 50, y + 25);
   } else {
     for (let i = 0; i < gastos.length; i++) {
       const g = gastos[i];
       const pVes = Number(g.precio) || 0;
       const pUsdt = Number(g.precio_usdt) || (r > 0 ? pVes / r : 0);
-      const recs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : [];
+      const rawRecs = Array.isArray(g.facturas) ? g.facturas.filter(Boolean) : (g.factura ? [g.factura] : []);
+      const recs = rawRecs.slice(0, 2);
 
-      // Fetch first image attachment if present so we can embed it on the right side of the card
-      let receiptDataUrl = null;
+      // Fetch up to 2 image attachments
+      const fetchedImages = [];
       for (const rFile of recs) {
         const ext = (rFile.split(".").pop() || "").toLowerCase();
         if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
-          receiptDataUrl = await fetchImageAsDataUrl(getReceiptUrl(rFile));
-          if (receiptDataUrl) break;
+          const dataUrl = await fetchImageAsDataUrl(getReceiptUrl(rFile));
+          if (dataUrl) fetchedImages.push(dataUrl);
         }
       }
 
@@ -1188,86 +1481,136 @@ async function generateClientSidePdf() {
       doc.setFillColor(255, 255, 255);
       doc.roundedRect(36, y, 540, cardHeight, 6, 6, "FD");
 
-      // Subtle right-hand panel for the receipt preview
-      const splitX = 360;
+      // Right-hand container for up to 2 photos
+      const splitX = 350;
+      const rightW = 226;
       doc.setFillColor(249, 250, 251);
-      doc.rect(splitX, y + 1, 215, cardHeight - 2, "F");
+      doc.rect(splitX, y + 1, rightW, cardHeight - 2, "F");
       doc.setDrawColor(229, 231, 235);
       doc.line(splitX, y, splitX, y + cardHeight);
 
-      // Left side: synchronized expense details (Insumo/Servicio, Monto VES, Monto USDT, Fecha)
+      // Left side: expense details
       const leftX = 50;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8.5);
       doc.setTextColor(107, 114, 128);
-      doc.text(`GASTO #${i + 1} · INSUMO / SERVICIO`, leftX, y + 20);
+      const cardHeaderTxt = isEn ? `EXPENSE #${i + 1} · ITEM / SERVICE` : `GASTO #${i + 1} · INSUMO / SERVICIO`;
+      doc.text(cardHeaderTxt, leftX, y + 20);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.setTextColor(17, 24, 39);
-      const prodLines = doc.splitTextToSize(String(g.producto || "Sin descripción"), 295);
+      const prodLines = doc.splitTextToSize(String(g.producto || (isEn ? "No description" : "Sin descripción")), 285);
       doc.text(prodLines.slice(0, 2), leftX, y + 35);
 
       const detailsY = y + 64;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9.5);
       doc.setTextColor(55, 65, 81);
-      doc.text("Monto (VES):", leftX, detailsY);
+      doc.text(isEn ? "Amount (VES):" : "Monto (VES):", leftX, detailsY);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(17, 24, 39);
-      doc.text(`VES ${formatNum(pVes)}`, leftX + 75, detailsY);
+      doc.text(`VES ${formatNum(pVes)}`, leftX + 80, detailsY);
 
       doc.setFont("helvetica", "bold");
       doc.setTextColor(55, 65, 81);
-      doc.text("Monto (USDT):", leftX, detailsY + 18);
+      doc.text(isEn ? "Amount (USDT):" : "Monto (USDT):", leftX, detailsY + 18);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(4, 120, 87);
-      doc.text(`$${formatNum(pUsdt)} USDT`, leftX + 75, detailsY + 18);
+      doc.text(`$${formatNum(pUsdt)} USDT`, leftX + 80, detailsY + 18);
 
       doc.setFont("helvetica", "bold");
       doc.setTextColor(55, 65, 81);
-      doc.text("Fecha:", leftX, detailsY + 36);
+      doc.text(isEn ? "Date:" : "Fecha:", leftX, detailsY + 36);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(75, 85, 99);
-      doc.text(String(g.fecha || "—"), leftX + 75, detailsY + 36);
+      doc.text(String(g.fecha || "—"), leftX + 80, detailsY + 36);
 
-      // Right side: subtle receipt thumbnail or status label
+      // Right side: render 1 or 2 photos cleanly side-by-side
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(107, 114, 128);
-      doc.text("COMPROBANTE ADJUNTO", splitX + 107.5, y + 14, { align: "center" });
+      const attHeaderTxt = isEn ? "ATTACHED RECEIPTS" : "COMPROBANTES ADJUNTOS";
+      doc.text(attHeaderTxt, splitX + (rightW / 2), y + 14, { align: "center" });
 
-      if (receiptDataUrl) {
+      if (fetchedImages.length === 2) {
         try {
-          doc.addImage(receiptDataUrl, "JPEG", splitX + 42, y + 20, 130, 86);
+          doc.addImage(fetchedImages[0], "JPEG", splitX + 10, y + 20, 98, 86);
+        } catch (_) {}
+        try {
+          doc.addImage(fetchedImages[1], "JPEG", splitX + 118, y + 20, 98, 86);
+        } catch (_) {}
+      } else if (fetchedImages.length === 1) {
+        try {
+          doc.addImage(fetchedImages[0], "JPEG", splitX + 46, y + 20, 134, 86);
         } catch (_) {
           doc.setFont("helvetica", "italic");
           doc.setFontSize(8.5);
-          doc.text("Adjunto registrado", splitX + 107.5, y + 64, { align: "center" });
+          doc.text(isEn ? "Receipt attached" : "Adjunto registrado", splitX + (rightW / 2), y + 64, { align: "center" });
         }
       } else if (recs.length > 0) {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8.5);
         doc.setTextColor(75, 85, 99);
-        doc.text(`Documento adjunto (${recs.length})`, splitX + 107.5, y + 64, { align: "center" });
+        const docMsg = isEn ? `Document attached (${recs.length})` : `Documento adjunto (${recs.length})`;
+        doc.text(docMsg, splitX + (rightW / 2), y + 64, { align: "center" });
       } else {
         doc.setFont("helvetica", "italic");
         doc.setFontSize(8.5);
         doc.setTextColor(156, 163, 175);
-        doc.text("Sin comprobante adjunto", splitX + 107.5, y + 64, { align: "center" });
+        const noAttMsg = isEn ? "No receipt attached" : "Sin comprobante adjunto";
+        doc.text(noAttMsg, splitX + (rightW / 2), y + 64, { align: "center" });
       }
 
       y += cardHeight + 12;
     }
   }
 
-  doc.save(`Nextglobal_Expense_Report_Week_${w.numero}.pdf`);
+  return doc;
+}
+
+async function generateClientSidePdf() {
+  showToast(t("toast_pdf_generating"));
+  const doc = await buildClientSidePdfDoc();
+  if (doc) {
+    const wNum = (appState.weekData && appState.weekData.numero) || "report";
+    doc.save(`Nextglobal_Expense_Report_Week_${wNum}.pdf`);
+  }
+}
+
+async function openPdfPreviewModal() {
+  const modal = document.getElementById("pdf-preview-modal");
+  const iframe = document.getElementById("pdf-preview-iframe");
+  const sub = document.getElementById("pdf-modal-subtitle");
+  const wNum = (appState.weekData && appState.weekData.numero) || "—";
+  sub.textContent = `${t("week_caption_prefix")} ${wNum}`;
+
+  showToast(t("toast_pdf_generating"));
+
+  if (appState.backendMode === "fastapi") {
+    iframe.src = `/api/week/${appState.selectedWeek}/report.pdf?lang=${appState.lang}#toolbar=0`;
+  } else {
+    const doc = await buildClientSidePdfDoc();
+    if (!doc) return;
+    const blob = doc.output("blob");
+    const blobUrl = URL.createObjectURL(blob);
+    iframe.src = blobUrl;
+  }
+  modal.classList.remove("hidden");
 }
 
 // ==========================================================================
 // EVENT LISTENERS INITIALIZATION
 // ==========================================================================
 document.addEventListener("DOMContentLoaded", () => {
+  // Initialize language & translations
+  applyTranslations();
+
+  const btnLangEs = document.getElementById("btn-lang-es");
+  const btnLangEn = document.getElementById("btn-lang-en");
+  if (btnLangEs) btnLangEs.addEventListener("click", () => setLanguage("es"));
+  if (btnLangEn) btnLangEn.addEventListener("click", () => setLanguage("en"));
+
   document.querySelectorAll(".tab-btn, .mobile-nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
@@ -1625,38 +1968,56 @@ document.addEventListener("DOMContentLoaded", () => {
       window.handleDeleteExpense(expenseId);
     });
 
-  // Download PDF & CSV
-  document.getElementById("btn-download-pdf").addEventListener("click", () => {
-    if (appState.backendMode === "fastapi") {
-      window.open(`/api/week/${appState.selectedWeek}/report.pdf`, "_blank");
-    } else {
-      generateClientSidePdf();
-    }
-  });
+  // Download PDF & Preview PDF
+  const btnDownloadPdf = document.getElementById("btn-download-pdf");
+  if (btnDownloadPdf) {
+    btnDownloadPdf.addEventListener("click", () => {
+      if (appState.backendMode === "fastapi") {
+        window.open(
+          `/api/week/${appState.selectedWeek}/report.pdf?lang=${appState.lang}`,
+          "_blank"
+        );
+      } else {
+        generateClientSidePdf();
+      }
+    });
+  }
 
-  document.getElementById("btn-download-csv").addEventListener("click", () => {
-    if (appState.backendMode === "fastapi") {
-      window.open(`/api/week/${appState.selectedWeek}/report.csv`, "_blank");
-      return;
-    }
-    const w = appState.weekData;
-    const lines = ["#,Item / Service,Price (VES),Price (USDT),Date"];
-    (w.gastos || []).forEach((g, idx) => {
-      const pVes = Number(g.precio) || 0;
-      const pUsdt =
-        Number(g.precio_usdt) || (appState.rate > 0 ? pVes / appState.rate : 0);
-      lines.push(
-        `${idx + 1},"${String(g.producto || "").replace(/"/g, '""')}",${pVes.toFixed(2)},${pUsdt.toFixed(2)},"${g.fecha || ""}"`
-      );
+  const btnPreviewPdf = document.getElementById("btn-preview-pdf");
+  if (btnPreviewPdf) {
+    btnPreviewPdf.addEventListener("click", () => {
+      openPdfPreviewModal();
     });
-    const blob = new Blob(["\ufeff" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
+  }
+
+  // PDF Preview Modal listeners
+  const btnClosePdfModal = document.getElementById("btn-close-pdf-modal");
+  if (btnClosePdfModal) {
+    btnClosePdfModal.addEventListener("click", () => {
+      document.getElementById("pdf-preview-modal").classList.add("hidden");
     });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `Nextglobal_Expenses_Week_${w.numero}.csv`;
-    a.click();
-  });
+  }
+  const pdfModal = document.getElementById("pdf-preview-modal");
+  if (pdfModal) {
+    pdfModal.addEventListener("click", (e) => {
+      if (e.target.id === "pdf-preview-modal") {
+        pdfModal.classList.add("hidden");
+      }
+    });
+  }
+  const btnModalDownloadPdf = document.getElementById("btn-modal-download-pdf");
+  if (btnModalDownloadPdf) {
+    btnModalDownloadPdf.addEventListener("click", () => {
+      if (appState.backendMode === "fastapi") {
+        window.open(
+          `/api/week/${appState.selectedWeek}/report.pdf?lang=${appState.lang}`,
+          "_blank"
+        );
+      } else {
+        generateClientSidePdf();
+      }
+    });
+  }
 
   // Financial Settings Save (Weekly Budget + Global Saldo Disponible)
   document

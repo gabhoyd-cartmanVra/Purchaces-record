@@ -27,22 +27,27 @@
         <img id="header-logo" class="brand-logo hidden" alt="Nextglobal Logo" />
         <div class="brand-text">
           <h1>NXTsavings</h1>
-          <span>Nexxtglobal Weekly Budget &amp; </span>
+          <span data-i18n="brand_sub">Nexxtglobal Weekly Budget Record</span>
         </div>
       </div>
 
       <div class="topbar-controls">
-        <div class="rate-pill" title="Tasa activa USDT / VES">
+        <div class="lang-switch" role="group" aria-label="Language Selector">
+          <button type="button" id="btn-lang-es" class="btn-lang active" title="Español">🇪🇸 ES</button>
+          <button type="button" id="btn-lang-en" class="btn-lang" title="English">🇺🇸 EN</button>
+        </div>
+
+        <div class="rate-pill" title="Tasa activa USDT / VES" data-i18n-title="rate_tooltip">
           <span class="conn-dot" id="conn-dot"></span>
           <span class="rate-pill-label" id="rate-source-label">USDT / VES:</span>
           <span class="rate-pill-value" id="header-rate-value">VES —</span>
-          <button type="button" id="btn-quick-sync-rate" class="btn btn-secondary btn-sm" title="Sincronizar con Binance P2P">
+          <button type="button" id="btn-quick-sync-rate" class="btn btn-secondary btn-sm" title="Sincronizar con Binance P2P" data-i18n-title="sync_btn_title">
             🔄
           </button>
         </div>
 
         <button type="button" id="btn-logout" class="btn btn-secondary btn-sm hidden">
-          🚪 Salir
+          🚪 <span data-i18n="nav_logout">Salir</span>
         </button>
       </div>
     </div>
@@ -57,30 +62,30 @@
       <section class="card" aria-labelledby="login-heading">
         <div style="text-align: center; margin-bottom: 18px;">
           <img id="login-logo" class="brand-logo hidden" style="height: 64px; margin: 0 auto 10px;" alt="Nexxtglobal" />
-          <h2 id="login-heading" class="card-title" style="font-size: 1.25rem;">🔒 Acceso al Sistema</h2>
-          <p class="card-subtitle">Portal de Caja Chica y Presupuesto Semanal Nexxtglobal</p>
+          <h2 id="login-heading" class="card-title" style="font-size: 1.25rem;" data-i18n="login_title">🔒 Acceso al Sistema</h2>
+          <p class="card-subtitle" data-i18n="login_subtitle">Portal de Caja Chica y Presupuesto Semanal Nexxtglobal</p>
         </div>
 
         <form id="login-form">
           <div class="form-group">
-            <label class="form-label" for="login-username">Usuario</label>
+            <label class="form-label" for="login-username" data-i18n="login_user_lbl">Usuario</label>
             <input type="text" id="login-username" class="form-input" value="Nextglobal" disabled />
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="login-password">Contraseña</label>
-            <input type="password" id="login-password" class="form-input" placeholder="Ingresa la clave de acceso..." required autocomplete="current-password" />
+            <label class="form-label" for="login-password" data-i18n="login_pass_lbl">Contraseña</label>
+            <input type="password" id="login-password" class="form-input" placeholder="Ingresa la clave de acceso..." data-i18n-placeholder="login_pass_ph" required autocomplete="current-password" />
           </div>
 
           <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
             <input type="checkbox" id="login-remember" checked style="width: 16px; height: 16px; accent-color: var(--accent-primary);" />
-            <label for="login-remember" style="font-size: 0.82rem; color: var(--text-secondary); cursor: pointer;">
+            <label for="login-remember" style="font-size: 0.82rem; color: var(--text-secondary); cursor: pointer;" data-i18n="login_remember">
               Recordar sesión en este dispositivo (móvil / PC)
             </label>
           </div>
 
           <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">
-            🔓 Iniciar Sesión
+            🔓 <span data-i18n="login_btn">Iniciar Sesión</span>
           </button>
         </form>
       </section>
@@ -89,20 +94,20 @@
       <section class="card" aria-labelledby="pub-pending-heading">
         <div class="card-header">
           <div>
-            <h2 id="pub-pending-heading" class="card-title">🛒 Lista de Compras Pendientes</h2>
-            <p class="card-subtitle">Registra insumos o necesidades antes de entrar al sistema completo.</p>
+            <h2 id="pub-pending-heading" class="card-title" data-i18n="pub_pending_title">🛒 Lista de Compras Pendientes</h2>
+            <p class="card-subtitle" data-i18n="pub_pending_sub">Registra insumos o necesidades antes de entrar al sistema completo.</p>
           </div>
           <span class="badge badge-medium" id="pub-pending-count">0 pendientes</span>
         </div>
 
         <form id="pub-pending-form" style="display: grid; grid-template-columns: 1fr 130px auto; gap: 8px; margin-bottom: 16px;">
-          <input type="text" id="pub-pending-name" class="form-input" placeholder="Insumo o necesidad (ej. Café, Papel, Marcadores)..." required />
+          <input type="text" id="pub-pending-name" class="form-input" placeholder="Insumo o necesidad (ej. Café, Papel, Marcadores)..." data-i18n-placeholder="pub_pending_ph" required />
           <select id="pub-pending-prio" class="form-select" aria-label="Prioridad">
-            <option value="High">🔴 Alta</option>
-            <option value="Medium" selected>🟡 Media</option>
-            <option value="Low">🟢 Baja</option>
+            <option value="High" data-i18n="prio_high">🔴 Alta</option>
+            <option value="Medium" selected data-i18n="prio_med">🟡 Media</option>
+            <option value="Low" data-i18n="prio_low">🟢 Baja</option>
           </select>
-          <button type="submit" class="btn btn-primary">➕ Agregar</button>
+          <button type="submit" class="btn btn-primary">➕ <span data-i18n="btn_add">Agregar</span></button>
         </form>
 
         <div id="pub-pending-list" class="pending-list"></div>
@@ -120,7 +125,7 @@
       <section class="card">
         <div class="card-header" style="margin-bottom: 10px;">
           <div>
-            <h2 class="card-title">📅 Control de Semana</h2>
+            <h2 class="card-title" data-i18n="week_ctrl_title">📅 Control de Semana</h2>
             <p class="card-subtitle" id="real-week-caption">Semana calendario actual: —</p>
           </div>
         </div>
@@ -132,7 +137,7 @@
         </div>
 
         <button type="button" id="btn-sync-real-week" class="btn btn-secondary btn-block btn-sm">
-          📍 Ir a Semana Actual
+          📍 <span data-i18n="btn_sync_week">Ir a Semana Actual</span>
         </button>
       </section>
 
@@ -140,21 +145,21 @@
       <section class="card" id="sidebar-pending-card">
         <div class="card-header" style="margin-bottom: 10px;">
           <div>
-            <h2 class="card-title">🛒 Compras Pendientes</h2>
-            <p class="card-subtitle">Toca ⚡ para cargar al formulario de gasto</p>
+            <h2 class="card-title" data-i18n="sb_pending_title">🛒 Compras Pendientes</h2>
+            <p class="card-subtitle" data-i18n="sb_pending_sub">Toca ⚡ para cargar al formulario de gasto</p>
           </div>
           <span class="badge badge-medium" id="sb-pending-count">0</span>
         </div>
 
         <form id="sb-pending-form" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
-          <input type="text" id="sb-pending-name" class="form-input" placeholder="Nuevo insumo pendiente..." required />
+          <input type="text" id="sb-pending-name" class="form-input" placeholder="Nuevo insumo pendiente..." data-i18n-placeholder="sb_pending_ph" required />
           <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px;">
             <select id="sb-pending-prio" class="form-select" aria-label="Prioridad">
-              <option value="High">🔴 Prioridad Alta</option>
-              <option value="Medium" selected>🟡 Prioridad Media</option>
-              <option value="Low">🟢 Prioridad Baja</option>
+              <option value="High" data-i18n="prio_high_full">🔴 Prioridad Alta</option>
+              <option value="Medium" selected data-i18n="prio_med_full">🟡 Prioridad Media</option>
+              <option value="Low" data-i18n="prio_low_full">🟢 Prioridad Baja</option>
             </select>
-            <button type="submit" class="btn btn-primary btn-sm">➕ Añadir</button>
+            <button type="submit" class="btn btn-primary btn-sm">➕ <span data-i18n="btn_add_short">Añadir</span></button>
           </div>
         </form>
 
@@ -176,7 +181,7 @@
           </div>
         </div>
         <button type="button" id="btn-toggle-fund" class="btn btn-primary">
-          ➕ Fondear Semana
+          ➕ <span data-i18n="btn_fund_week">Fondear Semana</span>
         </button>
       </section>
 
@@ -186,13 +191,13 @@
         <div class="kpi-card">
           <div class="kpi-split-inner">
             <div>
-              <div class="kpi-label">Presupuesto Semanal</div>
+              <div class="kpi-label" data-i18n="kpi_weekly_budget">Presupuesto Semanal</div>
               <div class="kpi-primary" id="kpi-budget-usdt">$25.00 USDT</div>
               <div class="kpi-secondary" id="kpi-budget-ves">VES 0.00</div>
             </div>
 
             <div class="kpi-split-divider">
-              <div class="kpi-label">Ahorro Disponible (Actual)</div>
+              <div class="kpi-label" data-i18n="kpi_global_avail">Ahorro Disponible (Actual)</div>
               <div class="kpi-primary available" id="kpi-avail-usdt">$0.00 USDT</div>
               <div class="kpi-secondary" id="kpi-avail-ves">VES 0.00</div>
             </div>
@@ -202,7 +207,7 @@
         <!-- Recuadro 2: Total Gastado + abajo/pequeño el Total Disponible DE LA SEMANA -->
         <div class="kpi-card">
           <div>
-            <div class="kpi-label">Total Gastado (<span class="week-label-inline">Semana</span>)</div>
+            <div class="kpi-label"><span data-i18n="kpi_total_spent">Total Gastado</span> (<span class="week-label-inline">Semana</span>)</div>
             <div class="kpi-primary spent" id="kpi-spent-usdt">$0.00 USDT</div>
             <div class="kpi-secondary" id="kpi-spent-ves">VES 0.00</div>
           </div>
@@ -221,18 +226,18 @@
 
       <!-- Desktop Tabs Bar -->
       <nav class="tabs-bar" aria-label="Secciones principales">
-        <button type="button" class="tab-btn active" data-tab="tab-record">📝 Registrar Gasto</button>
-        <button type="button" class="tab-btn" data-tab="tab-summary">📊 Historial y PDF (<span id="tab-count-badge">0</span>)</button>
-        <button type="button" class="tab-btn" data-tab="tab-edit">✏️ Editar Gasto</button>
-        <button type="button" class="tab-btn" data-tab="tab-settings">⚙️ Ajustes y Tasa</button>
+        <button type="button" class="tab-btn active" data-tab="tab-record" data-i18n="tab_record">📝 Registrar Gasto</button>
+        <button type="button" class="tab-btn" data-tab="tab-summary"><span data-i18n="tab_summary">📊 Historial y PDF</span> (<span id="tab-count-badge">0</span>)</button>
+        <button type="button" class="tab-btn" data-tab="tab-edit" data-i18n="tab_edit">✏️ Editar Gasto</button>
+        <button type="button" class="tab-btn" data-tab="tab-settings" data-i18n="tab_settings">⚙️ Ajustes y Tasa</button>
       </nav>
 
       <!-- TAB 1: RECORD EXPENSE -->
       <section id="tab-record" class="tab-panel card">
         <div class="card-header">
           <div>
-            <h2 class="card-title">📝 Registrar Compra / Gasto — <span class="week-label-inline">Semana</span></h2>
-            <p class="card-subtitle">Las fotos tomadas desde el celular se comprimen automáticamente antes de subir.</p>
+            <h2 class="card-title"><span data-i18n="record_title">📝 Registrar Compra / Gasto</span> — <span class="week-label-inline">Semana</span></h2>
+            <p class="card-subtitle" data-i18n="record_sub">Las fotos tomadas desde el celular se comprimen automáticamente antes de subir.</p>
           </div>
         </div>
 
@@ -241,42 +246,42 @@
 
           <div id="resolving-pending-banner" class="funding-banner is-funded hidden" style="padding: 10px 14px; margin-bottom: 14px;">
             <span style="font-size: 0.84rem;">
-              🛒 Completando compra pendiente: <strong id="resolving-pending-label"></strong>
+              <span data-i18n="resolving_pending_msg">🛒 Completando compra pendiente:</span> <strong id="resolving-pending-label"></strong>
             </span>
-            <button type="button" id="btn-clear-resolve-pending" class="btn btn-secondary btn-sm">✕ Cancelar vínculo</button>
+            <button type="button" id="btn-clear-resolve-pending" class="btn btn-secondary btn-sm" data-i18n="btn_cancel_link">✕ Cancelar vínculo</button>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="expense-name">Insumo, Producto o Servicio</label>
-            <input type="text" id="expense-name" class="form-input" placeholder="Ej. Botellones de agua, Café, Artículos de limpieza..." required />
+            <label class="form-label" for="expense-name" data-i18n="lbl_product_name">Insumo, Producto o Servicio</label>
+            <input type="text" id="expense-name" class="form-input" placeholder="Ej. Botellones de agua, Café, Artículos de limpieza..." data-i18n-placeholder="ph_product_name" required />
           </div>
 
           <div class="form-group price-Split-row">
             <div>
-              <label class="form-label" for="expense-price-ves">Precio Pagado en Bolívares (VES)</label>
+              <label class="form-label" for="expense-price-ves" data-i18n="lbl_price_ves">Precio Pagado en Bolívares (VES)</label>
               <input type="number" id="expense-price-ves" class="form-input mono" min="0.01" step="0.01" placeholder="0.00" required />
             </div>
             <div class="conversion-box">
-              <span class="label">Equivalente estimado en USDT (a tasa actual)</span>
+              <span class="label" data-i18n="lbl_est_usdt">Equivalente estimado en USDT (a tasa actual)</span>
               <span class="val" id="expense-live-usdt">$0.00 USDT</span>
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Comprobante de Pago / Factura (Opcional — hasta 3 archivos PNG, JPG o PDF)</label>
+            <label class="form-label" data-i18n="lbl_receipts_dropzone">Comprobantes de Pago / Facturas (Hasta 2 fotos PNG, JPG o PDF)</label>
             <div class="dropzone" id="record-dropzone">
               <input type="file" id="expense-files" accept=".png,.jpg,.jpeg,.webp,.pdf,image/*" multiple class="hidden" />
               <div style="font-size: 1.35rem; margin-bottom: 4px;">📷 📎</div>
-              <div style="font-weight: 600; font-size: 0.9rem;">Toca aquí para tomar foto de la factura o elegir archivos</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">
-                Compresión inteligente integrada — no necesitas usar páginas externas para bajar el peso de la foto.
+              <div style="font-weight: 600; font-size: 0.9rem;" data-i18n="dropzone_prompt">Toca aquí para tomar foto de la factura o elegir archivos (máx. 2)</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;" data-i18n="dropzone_help">
+                Compresión inteligente integrada — se ajustan automáticamente de forma elegante en el PDF.
               </div>
             </div>
             <div id="record-file-previews" class="receipt-previews"></div>
           </div>
 
           <button type="submit" id="btn-save-expense" class="btn btn-primary btn-block" style="padding: 12px;">
-            💾 Guardar Gasto en Semana
+            💾 <span data-i18n="btn_save_expense">Guardar Gasto en Semana</span>
           </button>
         </form>
       </section>
@@ -285,21 +290,21 @@
       <section id="tab-summary" class="tab-panel card hidden">
         <div class="card-header" style="flex-wrap: wrap;">
           <div>
-            <h2 class="card-title">📊 Historial de Gastos y Reportes — <span class="week-label-inline">Semana</span></h2>
-            <p class="card-subtitle">Descarga el reporte PDF con las facturas incrustadas o inspecciona cada comprobante.</p>
+            <h2 class="card-title"><span data-i18n="summary_title">📊 Historial de Gastos y Reportes</span> — <span class="week-label-inline">Semana</span></h2>
+            <p class="card-subtitle" data-i18n="summary_sub">Descarga o previsualiza el reporte PDF con las fotos de facturas incrustadas.</p>
           </div>
 
           <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button type="button" id="btn-download-pdf" class="btn btn-primary">
-              📄 Descargar Reporte PDF
+            <button type="button" id="btn-preview-pdf" class="btn btn-secondary">
+              🔍 <span data-i18n="btn_preview_pdf">Vista Previa PDF</span>
             </button>
-            <button type="button" id="btn-download-csv" class="btn btn-secondary">
-              📊 Exportar CSV
+            <button type="button" id="btn-download-pdf" class="btn btn-primary">
+              📄 <span data-i18n="btn_download_pdf">Descargar PDF</span>
             </button>
           </div>
         </div>
 
-        <div id="summary-empty-state" class="card-subtitle" style="padding: 28px 0; text-align: center;">
+        <div id="summary-empty-state" class="card-subtitle" style="padding: 28px 0; text-align: center;" data-i18n="empty_summary">
           No hay gastos registrados en esta semana todavía.
         </div>
 
@@ -308,12 +313,12 @@
             <thead>
               <tr>
                 <th>#</th>
-                <th>Insumo / Servicio</th>
-                <th>Monto (VES)</th>
-                <th>Monto (USDT)</th>
-                <th>Comprobantes</th>
-                <th>Fecha</th>
-                <th>Acciones</th>
+                <th data-i18n="tbl_col_item">Insumo / Servicio</th>
+                <th data-i18n="tbl_col_ves">Monto (VES)</th>
+                <th data-i18n="tbl_col_usdt">Monto (USDT)</th>
+                <th data-i18n="tbl_col_receipts">Comprobantes</th>
+                <th data-i18n="tbl_col_date">Fecha</th>
+                <th data-i18n="tbl_col_actions">Acciones</th>
               </tr>
             </thead>
             <tbody id="summary-tbody"></tbody>
@@ -325,56 +330,56 @@
       <section id="tab-edit" class="tab-panel card hidden">
         <div class="card-header">
           <div>
-            <h2 class="card-title">✏️ Editar o Eliminar Gasto — <span class="week-label-inline">Semana</span></h2>
-            <p class="card-subtitle">Corrige el nombre, el monto en VES o reemplaza los comprobantes adjuntos.</p>
+            <h2 class="card-title"><span data-i18n="edit_title">✏️ Editar o Eliminar Gasto</span> — <span class="week-label-inline">Semana</span></h2>
+            <p class="card-subtitle" data-i18n="edit_sub">Corrige el nombre, el monto en VES o reemplaza los comprobantes adjuntos.</p>
           </div>
         </div>
 
-        <div id="edit-empty-state" class="card-subtitle" style="padding: 24px 0; text-align: center;">
+        <div id="edit-empty-state" class="card-subtitle" style="padding: 24px 0; text-align: center;" data-i18n="empty_edit">
           No hay gastos registrados en esta semana para editar.
         </div>
 
         <div id="edit-form-wrapper" class="hidden">
           <div class="form-group">
-            <label class="form-label" for="edit-select-expense">Selecciona el gasto a modificar</label>
+            <label class="form-label" for="edit-select-expense" data-i18n="lbl_select_edit">Selecciona el gasto a modificar</label>
             <select id="edit-select-expense" class="form-select"></select>
           </div>
 
           <form id="form-edit-expense">
             <div class="form-group">
-              <label class="form-label" for="edit-expense-name">Insumo, Producto o Servicio</label>
+              <label class="form-label" for="edit-expense-name" data-i18n="lbl_product_name">Insumo, Producto o Servicio</label>
               <input type="text" id="edit-expense-name" class="form-input" required />
             </div>
 
             <div class="form-group price-Split-row">
               <div>
-                <label class="form-label" for="edit-expense-price">Precio en Bolívares (VES)</label>
+                <label class="form-label" for="edit-expense-price" data-i18n="lbl_edit_price_ves">Precio en Bolívares (VES)</label>
                 <input type="number" id="edit-expense-price" class="form-input mono" min="0.01" step="0.01" required />
               </div>
               <div class="conversion-box">
-                <span class="label">Nuevo equivalente en USDT</span>
+                <span class="label" data-i18n="lbl_new_est_usdt">Nuevo equivalente en USDT</span>
                 <span class="val" id="edit-live-usdt">$0.00 USDT</span>
               </div>
             </div>
 
             <div class="form-group">
-              <label class="form-label">Comprobantes Actuales</label>
+              <label class="form-label" data-i18n="lbl_curr_receipts">Comprobantes Actuales</label>
               <div id="edit-current-receipts" style="margin-bottom: 10px;"></div>
 
               <div class="dropzone" id="edit-dropzone">
                 <input type="file" id="edit-expense-files" accept=".png,.jpg,.jpeg,.webp,.pdf,image/*" multiple class="hidden" />
-                <div style="font-weight: 600; font-size: 0.86rem;">📎 Reemplazar comprobantes (opcional — hasta 3 archivos)</div>
-                <div style="font-size: 0.76rem; color: var(--text-secondary);">Si no subes archivos nuevos, se conservarán los comprobantes actuales.</div>
+                <div style="font-weight: 600; font-size: 0.86rem;" data-i18n="edit_dropzone_prompt">📎 Reemplazar comprobantes (opcional — hasta 2 fotos)</div>
+                <div style="font-size: 0.76rem; color: var(--text-secondary);" data-i18n="edit_dropzone_help">Si no subes archivos nuevos, se conservarán los comprobantes actuales.</div>
               </div>
               <div id="edit-file-previews" class="receipt-previews"></div>
             </div>
 
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
               <button type="submit" id="btn-update-expense" class="btn btn-primary" style="flex: 1;">
-                💾 Guardar Cambios
+                💾 <span data-i18n="btn_save_changes">Guardar Cambios</span>
               </button>
               <button type="button" id="btn-delete-selected-expense" class="btn btn-danger">
-                🗑️ Eliminar Gasto
+                🗑️ <span data-i18n="btn_delete_expense">Eliminar Gasto</span>
               </button>
             </div>
           </form>
@@ -385,32 +390,32 @@
       <section id="tab-settings" class="tab-panel card hidden">
         <div class="card-header">
           <div>
-            <h2 class="card-title">⚙️ Ajustes Financieros y Tasa USDT</h2>
-            <p class="card-subtitle">Configura el presupuesto aprobado por gerencia, el remanente acumulado y la tasa USDT/VES.</p>
+            <h2 class="card-title" data-i18n="settings_title">⚙️ Ajustes Financieros y Tasa USDT</h2>
+            <p class="card-subtitle" data-i18n="settings_sub">Configura el presupuesto aprobado por gerencia, el remanente acumulado y la tasa USDT/VES.</p>
           </div>
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
           <!-- Budget & Global Available Balance Settings -->
           <div class="card" style="background: var(--bg-elevated); padding: 18px;">
-            <h3 class="card-title" style="margin-bottom: 12px;">💵 Presupuesto Semanal y Saldo Disponible</h3>
+            <h3 class="card-title" style="margin-bottom: 12px;" data-i18n="settings_budget_title">💵 Presupuesto Semanal y Saldo Disponible</h3>
             <form id="form-week-settings">
               <div class="form-group">
-                <label class="form-label" for="setting-base-budget">Presupuesto Semanal Aprobado ($ USDT)</label>
+                <label class="form-label" for="setting-base-budget" data-i18n="lbl_base_budget">Presupuesto Semanal Aprobado ($ USDT)</label>
                 <input type="number" id="setting-base-budget" class="form-input mono" min="0" step="0.01" required />
               </div>
 
               <div class="form-group">
-                <label class="form-label" for="setting-global-balance">Saldo Disponible Actual en Caja ($ USDT)</label>
+                <label class="form-label" for="setting-global-balance" data-i18n="lbl_global_bal">Saldo Disponible Actual en Caja ($ USDT)</label>
                 <input type="number" id="setting-global-balance" class="form-input mono" min="-99999" step="0.01" required />
-                <span style="display:block; font-size:0.74rem; color:var(--text-secondary); margin-top:4px;">
+                <span style="display:block; font-size:0.74rem; color:var(--text-secondary); margin-top:4px;" data-i18n="help_global_bal">
                   Este saldo es global y se mantiene actualizado sin importar qué semana consultes.
                 </span>
               </div>
 
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 <button type="submit" class="btn btn-primary btn-block">
-                  💾 Guardar Presupuesto y Saldo Disponible
+                  💾 <span data-i18n="btn_save_settings">Guardar Presupuesto y Saldo Disponible</span>
                 </button>
               </div>
             </form>
@@ -418,19 +423,19 @@
 
           <!-- Exchange Rate Settings -->
           <div class="card" style="background: var(--bg-elevated); padding: 18px;">
-            <h3 class="card-title" style="margin-bottom: 12px;">🪙 Tasa de Cambio USDT / VES</h3>
+            <h3 class="card-title" style="margin-bottom: 12px;" data-i18n="settings_rate_title">🪙 Tasa de Cambio USDT / VES</h3>
             <form id="form-manual-rate">
               <div class="form-group">
-                <label class="form-label" for="setting-manual-rate">Tasa Manual USDT (VES)</label>
+                <label class="form-label" for="setting-manual-rate" data-i18n="lbl_manual_rate">Tasa Manual USDT (VES)</label>
                 <input type="number" id="setting-manual-rate" class="form-input mono" min="0.01" step="0.01" required />
               </div>
 
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 <button type="submit" class="btn btn-secondary btn-block">
-                  ✏️ Aplicar Tasa Manual
+                  ✏️ <span data-i18n="btn_apply_rate">Aplicar Tasa Manual</span>
                 </button>
                 <button type="button" id="btn-settings-sync-binance" class="btn btn-primary btn-block">
-                  🔄 Sincronizar en Vivo con Binance P2P
+                  🔄 <span data-i18n="btn_sync_binance">Sincronizar en Vivo con Binance P2P</span>
                 </button>
               </div>
             </form>
@@ -445,19 +450,19 @@
   <nav id="mobile-bottom-nav" class="mobile-bottom-nav hidden" aria-label="Navegación móvil">
     <button type="button" class="mobile-nav-btn active" data-tab="tab-record">
       <span class="mobile-nav-icon">📝</span>
-      <span>Registrar</span>
+      <span data-i18n="nav_m_record">Registrar</span>
     </button>
     <button type="button" class="mobile-nav-btn" data-tab="tab-summary">
       <span class="mobile-nav-icon">📊</span>
-      <span>Historial/PDF</span>
+      <span data-i18n="nav_m_summary">Historial/PDF</span>
     </button>
     <button type="button" class="mobile-nav-btn" data-tab="tab-edit">
       <span class="mobile-nav-icon">✏️</span>
-      <span>Editar</span>
+      <span data-i18n="nav_m_edit">Editar</span>
     </button>
     <button type="button" class="mobile-nav-btn" data-tab="tab-settings">
       <span class="mobile-nav-icon">⚙️</span>
-      <span>Ajustes</span>
+      <span data-i18n="nav_m_settings">Ajustes</span>
     </button>
   </nav>
 
@@ -469,9 +474,30 @@
           <h3 id="modal-title" class="card-title">📎 Comprobante de Pago</h3>
           <p id="modal-subtitle" class="card-subtitle"></p>
         </div>
-        <button type="button" id="btn-close-modal" class="btn btn-secondary btn-sm">✕ Cerrar</button>
+        <button type="button" id="btn-close-modal" class="btn btn-secondary btn-sm" data-i18n="btn_close_modal">✕ Cerrar</button>
       </div>
       <div id="modal-body" style="text-align: center;"></div>
+    </div>
+  </div>
+
+  <!-- PDF PREVIEW MODAL -->
+  <div id="pdf-preview-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-modal-title">
+    <div class="modal-content modal-content-large">
+      <div class="card-header" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h3 id="pdf-modal-title" class="card-title">🔍 <span data-i18n="pdf_modal_heading">Vista Previa del Reporte PDF</span></h3>
+          <p id="pdf-modal-subtitle" class="card-subtitle"></p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" id="btn-modal-download-pdf" class="btn btn-primary btn-sm">
+            📄 <span data-i18n="btn_download_pdf">Descargar PDF</span>
+          </button>
+          <button type="button" id="btn-close-pdf-modal" class="btn btn-secondary btn-sm" data-i18n="btn_close_modal">✕ Cerrar</button>
+        </div>
+      </div>
+      <div id="pdf-modal-body" class="pdf-modal-iframe-wrap">
+        <iframe id="pdf-preview-iframe" title="PDF Preview" style="width: 100%; height: 74vh; border: none; border-radius: var(--radius-sm); background: #ffffff;"></iframe>
+      </div>
     </div>
   </div>
 

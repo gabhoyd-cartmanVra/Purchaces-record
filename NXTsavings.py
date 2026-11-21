@@ -536,7 +536,7 @@ def generate_pdf_report(
         parent=styles["Title"],
         fontSize=17,
         leading=21,
-        alignment=0,
+        alignment=center,
         textColor=colors.HexColor("#111827"),
     )
     sub_style = ParagraphStyle(
@@ -554,7 +554,7 @@ def generate_pdf_report(
         textColor=colors.HexColor("#1F2937"),
     )
 
-    doc_title = "NEXXTGLOBAL — WEEKLY EXPENSE REPORT"
+    doc_title = " — WEEKLY EXPENSE REPORT"
     gen_label = "Generated" if is_en else "Generado"
     rate_label = "USDT Exchange Rate" if is_en else "Tasa de Cambio USDT"
     week_label = "Week" if is_en else "Semana"
